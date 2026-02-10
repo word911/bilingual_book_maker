@@ -1,11 +1,29 @@
 import argparse
 import json
 import os
+from pathlib import Path
 from os import environ as env
 
 from book_maker.loader import BOOK_LOADER_DICT
 from book_maker.translator import MODEL_DICT
 from book_maker.utils import LANGUAGES, TO_LANGUAGE_CODE
+
+TOKEN_ESTIMATOR_MODEL_MAP = {
+    "chatgptapi": "gpt-3.5-turbo",
+    "gpt4": "gpt-4",
+    "gpt4omini": "gpt-4o-mini",
+    "gpt4o": "gpt-4o",
+    "gpt5mini": "gpt-5-mini",
+    "o1preview": "o1-preview",
+    "o1": "o1",
+    "o1mini": "o1-mini",
+    "o3mini": "o3-mini",
+    "gemini": "gemini-2.0-flash-exp",
+    "geminipro": "gemini-1.5-pro",
+    "qwen": "qwen-mt-plus",
+    "qwen-mt-turbo": "qwen-mt-turbo",
+    "qwen-mt-plus": "qwen-mt-plus",
+}
 
 
 def parse_prompt_arg(prompt_arg):
@@ -100,6 +118,27 @@ def parse_prompt_arg(prompt_arg):
 
     print("prompt config:", prompt)
     return prompt
+
+
+def resolve_token_estimator_model(
+    model_key, model_list_arg="", custom_openai_model_name=None, ollama_model=""
+):
+    if custom_openai_model_name:
+        return custom_openai_model_name
+
+    if model_list_arg:
+        for model_name in model_list_arg.split(","):
+            model_name = model_name.strip()
+            if model_name:
+                return model_name
+
+    if ollama_model:
+        return ollama_model
+
+    if model_key.startswith("claude-") or model_key.startswith("qwen-"):
+        return model_key
+
+    return TOKEN_ESTIMATOR_MODEL_MAP.get(model_key, model_key)
 
 
 def main():
@@ -211,9 +250,12 @@ def main():
         dest="model",
         type=str,
         default="chatgptapi",
-        choices=translate_model_list,  # support DeepL later
         metavar="MODEL",
-        help="model to use, available: {%(choices)s}",
+        help=(
+            "model key to use. built-in: "
+            + ", ".join(translate_model_list)
+            + ". If MODEL is not built-in, provide --api_base to use it as an OpenAI-compatible model name."
+        ),
     )
     parser.add_argument(
         "--ollama_model",
@@ -315,6 +357,34 @@ So you are close to reaching the limit. You have to choose your own value, there
 """,
     )
     parser.add_argument(
+        "--accumulated-min-num",
+        dest="accumulated_min_num",
+        type=int,
+        default=200,
+        help="minimum accumulated_num after automatic backoff (only used when --accumulated_num > 1)",
+    )
+    parser.add_argument(
+        "--accumulated-backoff-factor",
+        dest="accumulated_backoff_factor",
+        type=float,
+        default=0.7,
+        help="backoff factor for accumulated_num when gateway timeout is detected (0 < factor < 1)",
+    )
+    parser.add_argument(
+        "--accumulated-recover-factor",
+        dest="accumulated_recover_factor",
+        type=float,
+        default=1.15,
+        help="recovery factor for accumulated_num after stable batches (factor > 1)",
+    )
+    parser.add_argument(
+        "--accumulated-recover-successes",
+        dest="accumulated_recover_successes",
+        type=int,
+        default=6,
+        help="number of stable batches required before increasing accumulated_num",
+    )
+    parser.add_argument(
         "--translation_style",
         dest="translation_style",
         type=str,
@@ -399,6 +469,24 @@ So you are close to reaching the limit. You have to choose your own value, there
         help="Request interval in seconds (e.g., 0.1 for 100ms). Currently only supported for Gemini models. Default: 0.01",
     )
     parser.add_argument(
+        "--rpm",
+        type=float,
+        default=0.0,
+        help="max requests per minute. 0 means no explicit cap. works for Gemini and OpenAI-compatible models",
+    )
+    parser.add_argument(
+        "--gateway-cooldown-threshold",
+        type=int,
+        default=3,
+        help="after this many consecutive 504 gateway timeout errors, trigger a cooldown window",
+    )
+    parser.add_argument(
+        "--gateway-cooldown-seconds",
+        type=float,
+        default=120.0,
+        help="cooldown duration in seconds after repeated 504 gateway timeout errors",
+    )
+    parser.add_argument(
         "--parallel-workers",
         dest="parallel_workers",
         type=int,
@@ -407,6 +495,38 @@ So you are close to reaching the limit. You have to choose your own value, there
     )
 
     options = parser.parse_args()
+    if options.rpm < 0:
+        parser.error("`--rpm` must be >= 0")
+    if options.accumulated_min_num < 2:
+        parser.error("`--accumulated-min-num` must be >= 2")
+    if not (0 < options.accumulated_backoff_factor < 1):
+        parser.error("`--accumulated-backoff-factor` must satisfy 0 < value < 1")
+    if options.accumulated_recover_factor <= 1:
+        parser.error("`--accumulated-recover-factor` must be > 1")
+    if options.accumulated_recover_successes <= 0:
+        parser.error("`--accumulated-recover-successes` must be > 0")
+    if options.gateway_cooldown_threshold <= 0:
+        parser.error("`--gateway-cooldown-threshold` must be > 0")
+    if options.gateway_cooldown_seconds < 0:
+        parser.error("`--gateway-cooldown-seconds` must be >= 0")
+
+    model_key = options.model
+    custom_openai_model_name = None
+    if model_key not in MODEL_DICT:
+        if options.api_base:
+            custom_openai_model_name = model_key
+            model_key = "openai"
+        else:
+            parser.error(
+                f"unsupported model `{options.model}`. use one of {translate_model_list} "
+                "or provide --api_base for OpenAI-compatible custom models",
+            )
+    token_estimator_model = resolve_token_estimator_model(
+        model_key=model_key,
+        model_list_arg=options.model_list or "",
+        custom_openai_model_name=custom_openai_model_name,
+        ollama_model=options.ollama_model or "",
+    )
 
     if not options.book_name:
         print("Error: please provide the path of your book using --book_name <path>")
@@ -420,10 +540,10 @@ So you are close to reaching the limit. You have to choose your own value, there
         os.environ["http_proxy"] = PROXY
         os.environ["https_proxy"] = PROXY
 
-    translate_model = MODEL_DICT.get(options.model)
+    translate_model = MODEL_DICT.get(model_key)
     assert translate_model is not None, "unsupported model"
     API_KEY = ""
-    if options.model in [
+    if model_key in [
         "openai",
         "chatgptapi",
         "gpt4",
@@ -453,29 +573,29 @@ So you are close to reaching the limit. You have to choose your own value, there
             raise Exception(
                 "OpenAI API key not provided, please google how to obtain it",
             )
-    elif options.model == "caiyun":
+    elif model_key == "caiyun":
         API_KEY = options.caiyun_key or env.get("BBM_CAIYUN_API_KEY")
         if not API_KEY:
             raise Exception("Please provide caiyun key")
-    elif options.model == "deepl":
+    elif model_key == "deepl":
         API_KEY = options.deepl_key or env.get("BBM_DEEPL_API_KEY")
         if not API_KEY:
             raise Exception("Please provide deepl key")
-    elif options.model.startswith("claude"):
+    elif model_key.startswith("claude"):
         API_KEY = options.claude_key or env.get("BBM_CLAUDE_API_KEY")
         if not API_KEY:
             raise Exception("Please provide claude key")
-    elif options.model == "customapi":
+    elif model_key == "customapi":
         API_KEY = options.custom_api or env.get("BBM_CUSTOM_API")
         if not API_KEY:
             raise Exception("Please provide custom translate api")
-    elif options.model in ["gemini", "geminipro"]:
+    elif model_key in ["gemini", "geminipro"]:
         API_KEY = options.gemini_key or env.get("BBM_GOOGLE_GEMINI_KEY")
-    elif options.model == "groq":
+    elif model_key == "groq":
         API_KEY = options.groq_key or env.get("BBM_GROQ_API_KEY")
-    elif options.model == "xai":
+    elif model_key == "xai":
         API_KEY = options.xai_key or env.get("BBM_XAI_API_KEY")
-    elif options.model.startswith("qwen-"):
+    elif model_key.startswith("qwen-"):
         API_KEY = options.qwen_key or env.get("BBM_QWEN_API_KEY")
     else:
         API_KEY = ""
@@ -504,6 +624,16 @@ So you are close to reaching the limit. You have to choose your own value, there
 
     book_loader = BOOK_LOADER_DICT.get(book_type)
     assert book_loader is not None, "unsupported loader"
+
+    checkpoint_path = (
+        Path(options.book_name).parent / f".{Path(options.book_name).stem}.temp.bin"
+    )
+    if not options.resume and checkpoint_path.exists():
+        options.resume = True
+        print(
+            f"Found checkpoint file: {checkpoint_path}. Auto resume enabled."
+        )
+
     language = options.language
     if options.language in LANGUAGES:
         # use the value for prompt
@@ -533,6 +663,14 @@ So you are close to reaching the limit. You have to choose your own value, there
         source_lang=options.source_lang,
         parallel_workers=options.parallel_workers,
     )
+    if hasattr(e.translate_model, "set_gateway_cooldown"):
+        e.translate_model.set_gateway_cooldown(
+            options.gateway_cooldown_threshold,
+            options.gateway_cooldown_seconds,
+        )
+    if hasattr(e, "token_estimator_model"):
+        e.token_estimator_model = token_estimator_model
+        print(f"Using token estimator model: {token_estimator_model}")
     # other options
     if options.allow_navigable_strings:
         e.allow_navigable_strings = True
@@ -546,6 +684,14 @@ So you are close to reaching the limit. You have to choose your own value, there
         e.only_filelist = options.only_filelist
     if options.accumulated_num > 1:
         e.accumulated_num = options.accumulated_num
+    if hasattr(e, "accumulated_min_num"):
+        e.accumulated_min_num = options.accumulated_min_num
+    if hasattr(e, "accumulated_backoff_factor"):
+        e.accumulated_backoff_factor = options.accumulated_backoff_factor
+    if hasattr(e, "accumulated_recover_factor"):
+        e.accumulated_recover_factor = options.accumulated_recover_factor
+    if hasattr(e, "accumulated_recover_successes"):
+        e.accumulated_recover_successes = options.accumulated_recover_successes
     if options.translation_style:
         e.translation_style = options.translation_style
     if options.batch_size:
@@ -555,7 +701,7 @@ So you are close to reaching the limit. You have to choose your own value, there
     if options.deployment_id:
         # only work for ChatGPT api for now
         # later maybe support others
-        assert options.model in [
+        assert model_key in [
             "chatgptapi",
             "gpt4",
             "gpt4omini",
@@ -569,40 +715,44 @@ So you are close to reaching the limit. You have to choose your own value, there
         if not options.api_base:
             raise ValueError("`api_base` must be provided when using `deployment_id`")
         e.translate_model.set_deployment_id(options.deployment_id)
-    if options.model in ("openai", "groq"):
+    if model_key in ("openai", "groq"):
         # Currently only supports `openai` when you also have --model_list set
         if options.model_list:
             e.translate_model.set_model_list(options.model_list.split(","))
+        elif custom_openai_model_name:
+            e.translate_model.set_model_list([custom_openai_model_name])
         else:
             raise ValueError(
                 "When using `openai` model, you must also provide `--model_list`. For default model sets use `--model chatgptapi` or `--model gpt4` or `--model gpt4omini` or `--model gpt5mini`",
             )
+        if options.rpm > 0 and hasattr(e.translate_model, "set_rpm"):
+            e.translate_model.set_rpm(options.rpm)
     # TODO refactor, quick fix for gpt4 model
-    if options.model == "chatgptapi":
+    if model_key == "chatgptapi":
         if options.ollama_model:
             e.translate_model.set_gpt35_models(ollama_model=options.ollama_model)
         else:
             e.translate_model.set_gpt35_models()
-    if options.model == "gpt4":
+    if model_key == "gpt4":
         e.translate_model.set_gpt4_models()
-    if options.model == "gpt4omini":
+    if model_key == "gpt4omini":
         e.translate_model.set_gpt4omini_models()
-    if options.model == "gpt4o":
+    if model_key == "gpt4o":
         e.translate_model.set_gpt4o_models()
-    if options.model == "gpt5mini":
+    if model_key == "gpt5mini":
         e.translate_model.set_gpt5mini_models()
-    if options.model == "o1preview":
+    if model_key == "o1preview":
         e.translate_model.set_o1preview_models()
-    if options.model == "o1":
+    if model_key == "o1":
         e.translate_model.set_o1_models()
-    if options.model == "o1mini":
+    if model_key == "o1mini":
         e.translate_model.set_o1mini_models()
-    if options.model == "o3mini":
+    if model_key == "o3mini":
         e.translate_model.set_o3mini_models()
-    if options.model.startswith("claude-"):
-        e.translate_model.set_claude_model(options.model)
-    if options.model.startswith("qwen-"):
-        e.translate_model.set_qwen_model(options.model)
+    if model_key.startswith("claude-"):
+        e.translate_model.set_claude_model(model_key)
+    if model_key.startswith("qwen-"):
+        e.translate_model.set_qwen_model(model_key)
     if options.block_size > 0:
         e.block_size = options.block_size
     if options.batch_flag:
@@ -610,14 +760,17 @@ So you are close to reaching the limit. You have to choose your own value, there
     if options.batch_use_flag:
         e.batch_use_flag = options.batch_use_flag
 
-    if options.model in ("gemini", "geminipro"):
-        e.translate_model.set_interval(options.interval)
-    if options.model == "gemini":
+    if model_key in ("gemini", "geminipro"):
+        if options.rpm > 0:
+            e.translate_model.set_interval(60.0 / options.rpm)
+        else:
+            e.translate_model.set_interval(options.interval)
+    if model_key == "gemini":
         if options.model_list:
             e.translate_model.set_model_list(options.model_list.split(","))
         else:
             e.translate_model.set_geminiflash_models()
-    if options.model == "geminipro":
+    if model_key == "geminipro":
         e.translate_model.set_geminipro_models()
 
     e.make_bilingual_book()

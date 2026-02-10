@@ -119,6 +119,17 @@ class ChatGPTAPI(Base):
         self.batch_info_cache = None
         self.result_content_cache = {}
         self._api_lock = Lock()
+        self._request_lock = Lock()
+        self._min_request_interval = 0.0
+        self._next_request_ts = 0.0
+        self._gateway_timeout_streak = 0
+        self._gateway_cooldown_threshold = max(
+            1, int(kwargs.get("gateway_cooldown_threshold", 3))
+        )
+        self._gateway_cooldown_seconds = max(
+            0.0, float(kwargs.get("gateway_cooldown_seconds", 120.0))
+        )
+        self._gateway_timeout_events = 0
 
     def rotate_key(self):
         with self._api_lock:
@@ -166,9 +177,56 @@ class ChatGPTAPI(Base):
         )
         return completion
 
+    def _wait_for_request_slot(self):
+        if self._min_request_interval <= 0:
+            return
+        with self._request_lock:
+            now = time.monotonic()
+            wait_seconds = self._next_request_ts - now
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+                now = time.monotonic()
+            self._next_request_ts = now + self._min_request_interval
+
+    def _is_gateway_timeout_error(self, err):
+        msg = str(err).lower()
+        gateway_patterns = [
+            "gateway time-out",
+            "gateway timeout",
+            "error code 504",
+            " 504",
+        ]
+        return any(p in msg for p in gateway_patterns)
+
+    def _maybe_apply_gateway_timeout_cooldown(self, err):
+        if not self._is_gateway_timeout_error(err):
+            self._gateway_timeout_streak = 0
+            return
+
+        self._gateway_timeout_events += 1
+        self._gateway_timeout_streak += 1
+        if self._gateway_timeout_streak < self._gateway_cooldown_threshold:
+            return
+
+        cooldown_seconds = self._gateway_cooldown_seconds
+        print(
+            "Detected consecutive 504 gateway timeout errors "
+            f"({self._gateway_timeout_streak}), cooling down for "
+            f"{cooldown_seconds} seconds",
+        )
+        if cooldown_seconds > 0:
+            time.sleep(cooldown_seconds)
+        self._gateway_timeout_streak = 0
+
+    def consume_gateway_timeout_events(self):
+        events = self._gateway_timeout_events
+        self._gateway_timeout_events = 0
+        return events
+
     def get_translation(self, text):
         self.rotate_key()
         self.rotate_model()  # rotate all the model to avoid the limit
+        self._wait_for_request_slot()
 
         completion = self.create_chat_completion(text)
 
@@ -206,12 +264,14 @@ class ChatGPTAPI(Base):
         while attempt_count < max_attempts:
             try:
                 t_text = self.get_translation(text)
+                self._gateway_timeout_streak = 0
                 break
             except RateLimitError as e:
                 # todo: better sleep time? why sleep alawys about key_len
                 # 1. openai server error or own network interruption, sleep for a fixed time
                 # 2. an apikey has no money or reach limit, don`t sleep, just replace it with another apikey
                 # 3. all apikey reach limit, then use current sleep
+                self._gateway_timeout_streak = 0
                 sleep_time = int(60 / self.key_len)
                 print(e, f"will sleep {sleep_time} seconds")
                 time.sleep(sleep_time)
@@ -220,8 +280,20 @@ class ChatGPTAPI(Base):
                     print(f"Get {attempt_count} consecutive exceptions")
                     raise
             except Exception as e:
-                print(str(e))
-                return
+                # Transient network/provider errors should retry instead of returning None.
+                self._maybe_apply_gateway_timeout_cooldown(e)
+                sleep_time = min(2**attempt_count, 30)
+                print(
+                    f"{type(e).__name__}: {e}, will retry in {sleep_time} seconds",
+                )
+                time.sleep(sleep_time)
+                attempt_count += 1
+                if attempt_count == max_attempts:
+                    print(f"Get {attempt_count} consecutive exceptions")
+                    raise RuntimeError(
+                        "Translation failed after retries; last error: "
+                        f"{type(e).__name__}: {e}",
+                    ) from e
 
         # todo: Determine whether to print according to the cli option
         if needprint:
@@ -306,16 +378,46 @@ class ChatGPTAPI(Base):
 
         return new_text
 
-    def translate_list(self, plist):
+    def _extract_paragraph_text(self, paragraph):
+        temp_p = copy(paragraph)
+        if hasattr(temp_p, "find_all"):
+            for sup in temp_p.find_all("sup"):
+                sup.extract()
+        if hasattr(temp_p, "get_text"):
+            return temp_p.get_text().strip()
+        return str(temp_p).strip()
+
+    def _translate_single_paragraph(self, paragraph):
+        para_text = self._extract_paragraph_text(paragraph)
+        if not para_text:
+            return ""
+        try:
+            return self.translate(para_text, False) or ""
+        except Exception as item_err:
+            print(
+                "Fallback paragraph translation failed: "
+                f"{type(item_err).__name__}: {item_err}",
+            )
+            return ""
+
+    def _looks_like_failed_batch_result(self, plist, translated_paragraphs):
+        has_non_empty_input = any(
+            bool(self._extract_paragraph_text(p)) for p in plist
+        )
+        has_non_empty_output = any(
+            bool((text or "").strip()) for text in translated_paragraphs
+        )
+        return has_non_empty_input and not has_non_empty_output
+
+    def _translate_list_once(self, plist):
         plist_len = len(plist)
+        if plist_len == 0:
+            return []
 
         # Create a list of original texts and add clear numbering markers to each paragraph
         formatted_text = ""
         for i, p in enumerate(plist, 1):
-            temp_p = copy(p)
-            for sup in temp_p.find_all("sup"):
-                sup.extract()
-            para_text = temp_p.get_text().strip()
+            para_text = self._extract_paragraph_text(p)
             # Using special delimiters and clear numbering
             formatted_text += f"PARAGRAPH {i}:\n{para_text}\n\n"
 
@@ -337,8 +439,15 @@ class ChatGPTAPI(Base):
         )
 
         self.prompt_template = structured_prompt + " ```{text}```"
+        try:
+            translated_text = self.translate(formatted_text, False)
+        finally:
+            self.prompt_template = original_prompt_template
 
-        translated_text = self.translate(formatted_text, False)
+        if translated_text is None:
+            raise RuntimeError(
+                "translate_list got None translation result from model",
+            )
 
         # Extract translations from structured output
         translated_paragraphs = []
@@ -365,8 +474,6 @@ class ChatGPTAPI(Base):
                     translated_paragraphs.append(loose_matches[0].strip())
                 else:
                     translated_paragraphs.append("")
-
-        self.prompt_template = original_prompt_template
 
         # If the number of extracted paragraphs is incorrect, try the alternative extraction method.
         if len(translated_paragraphs) != plist_len:
@@ -406,7 +513,41 @@ class ChatGPTAPI(Base):
         elif len(translated_paragraphs) > plist_len:
             translated_paragraphs = translated_paragraphs[:plist_len]
 
+        if self._looks_like_failed_batch_result(plist, translated_paragraphs):
+            raise RuntimeError(
+                "Batch translation output could not be parsed into non-empty paragraphs",
+            )
+
         return translated_paragraphs
+
+    def _translate_list_adaptive(self, plist):
+        plist_len = len(plist)
+        if plist_len == 0:
+            return []
+        try:
+            return self._translate_list_once(plist)
+        except Exception as e:
+            if plist_len == 1:
+                print(
+                    "Batch paragraph translation failed for single paragraph, "
+                    "fallback to direct translation: "
+                    f"{type(e).__name__}: {e}",
+                )
+                return [self._translate_single_paragraph(plist[0])]
+
+            split_index = max(1, plist_len // 2)
+            left = plist[:split_index]
+            right = plist[split_index:]
+            print(
+                "Batch paragraph translation failed, retrying with smaller batches: "
+                f"{len(left)} + {len(right)} ({type(e).__name__}: {e})",
+            )
+            return self._translate_list_adaptive(left) + self._translate_list_adaptive(
+                right
+            )
+
+    def translate_list(self, plist):
+        return self._translate_list_adaptive(plist)
 
     def extract_paragraphs(self, text, paragraph_count):
         """Extract paragraphs from translated text, ensuring paragraph count is preserved."""
@@ -558,6 +699,30 @@ class ChatGPTAPI(Base):
         model_list = list(set(model_list))
         print(f"Using model list {model_list}")
         self.model_list = cycle(model_list)
+
+    def set_interval(self, interval):
+        interval = float(interval)
+        if interval < 0:
+            raise ValueError("`interval` must be >= 0")
+        self._min_request_interval = interval
+        self._next_request_ts = 0.0
+
+    def set_rpm(self, rpm):
+        rpm = float(rpm)
+        if rpm <= 0:
+            self.set_interval(0.0)
+            return
+        self.set_interval(60.0 / rpm)
+
+    def set_gateway_cooldown(self, threshold=3, cooldown_seconds=120.0):
+        threshold = int(threshold)
+        cooldown_seconds = float(cooldown_seconds)
+        if threshold <= 0:
+            threshold = 1
+        if cooldown_seconds < 0:
+            cooldown_seconds = 0.0
+        self._gateway_cooldown_threshold = threshold
+        self._gateway_cooldown_seconds = cooldown_seconds
 
     def batch_init(self, book_name):
         self.book_name = self.sanitize_book_name(book_name)

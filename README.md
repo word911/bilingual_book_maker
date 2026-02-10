@@ -40,6 +40,7 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - The default underlying model is [GPT-3.5-turbo](https://openai.com/blog/introducing-chatgpt-and-whisper-apis), which is used by ChatGPT currently. Use `--model gpt4` to change the underlying model to `GPT4`. You can also use `GPT4omini`.
 - Important to note that `gpt-4` is significantly more expensive than `gpt-4-turbo`, but to avoid bumping into rate limits, we automatically balance queries across `gpt-4-1106-preview`, `gpt-4`, `gpt-4-32k`, `gpt-4-0613`,`gpt-4-32k-0613`.
 - If you want to use a specific model alias with OpenAI (eg `gpt-4-1106-preview` or `gpt-3.5-turbo-0125`), you can use `--model openai --model_list gpt-4-1106-preview,gpt-3.5-turbo-0125`. `--model_list` takes a comma-separated list of model aliases.
+- You can also pass an OpenAI-compatible custom model name directly (for example `DeepSeek-V3.2`) by setting both `--model <custom_name>` and `--api_base <proxy_or_gateway_url>`.
 - If using chatgptapi, you can add `--use_context` to add a context paragraph to each passage sent to the model for translation (see below).
 
 * DeepL
@@ -148,6 +149,7 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - `--resume`:
 
   Use `--resume` option to manually resume the process after an interruption.
+  If a checkpoint file (`.<book_name>.temp.bin`) exists in the same folder, resume is auto-enabled even without `--resume`.
 
   ```shell
   python3 make_book.py --book_name test_books/animal_farm.epub --model google --resume
@@ -204,7 +206,20 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - `--accumulated_num`:
 
   Wait for how many tokens have been accumulated before starting the translation. gpt3.5 limits the total_token to 4090. For example, if you use `--accumulated_num 1600`, maybe openai will output 2200 tokens and maybe 200 tokens for other messages in the system messages user messages, 1600+2200+200=4000, So you are close to reaching the limit. You have to choose your own
-  value, there is no way to know if the limit is reached before sending
+  value, there is no way to know if the limit is reached before sending.
+  Note: actual input tokens shown in provider dashboards can be higher than `--accumulated_num` due to prompt wrappers, paragraph markers, and message overhead.
+
+- `--accumulated-min-num`, `--accumulated-backoff-factor`, `--accumulated-recover-factor`, `--accumulated-recover-successes`:
+
+  Controls adaptive accumulated batching. When timeout-like failures occur, the current accumulated budget is reduced; after stable batches it increases gradually toward the original value.
+
+- `--rpm`:
+
+  Sets a request-per-minute cap for OpenAI-compatible models and Gemini.
+
+- `--gateway-cooldown-threshold`, `--gateway-cooldown-seconds`:
+
+  Controls cooldown behavior for repeated `504 Gateway Timeout` failures.
 
 - `--use_context`:
 
@@ -288,6 +303,12 @@ python3 make_book.py --book_name test_books/animal_farm.epub --model openai --mo
 
 # Use a specific list of OpenAI model aliases
 python3 make_book.py --book_name test_books/animal_farm.epub --model openai --model_list gpt-4-1106-preview,gpt-4-0125-preview,gpt-3.5-turbo-0125 --openai_key ${openai_key}
+
+# Use an OpenAI-compatible custom model name directly
+python3 make_book.py --book_name test_books/animal_farm.epub --model DeepSeek-V3.2 --api_base "https://your-gateway/v1" --openai_key ${openai_key}
+
+# Tune gateway resilience with RPM and adaptive accumulated controls
+python3 make_book.py --book_name test_books/animal_farm.epub --model gpt-5-nano --api_base "https://your-gateway/v1" --openai_key ${openai_key} --rpm 10 --accumulated_num 1200 --accumulated-min-num 300 --accumulated-backoff-factor 0.7 --accumulated-recover-factor 1.15 --accumulated-recover-successes 6 --gateway-cooldown-threshold 2 --gateway-cooldown-seconds 180
 
 # Use the DeepL model with Japanese
 python3 make_book.py --book_name test_books/animal_farm.epub --model deepl --deepl_key ${deepl_key} --language ja

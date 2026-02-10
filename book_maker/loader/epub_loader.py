@@ -19,7 +19,7 @@ from tqdm import tqdm
 from book_maker.utils import num_tokens_from_text, prompt_config_to_kwargs
 
 from .base_loader import BaseBookLoader
-from .helper import EPUBBookLoaderHelper, is_text_link, not_trans
+from .helper import EPUBBookLoaderHelper, is_text_link, not_trans, shorter_result_link
 
 
 class EPUBBookLoader(BaseBookLoader):
@@ -59,6 +59,13 @@ class EPUBBookLoader(BaseBookLoader):
         self.exclude_translate_tags = "sup"
         self.allow_navigable_strings = False
         self.accumulated_num = 1
+        self.token_estimator_model = "gpt-3.5-turbo-0301"
+        self.accumulated_min_num = 200
+        self.accumulated_backoff_factor = 0.7
+        self.accumulated_recover_factor = 1.15
+        self.accumulated_recover_successes = 6
+        self._dynamic_accumulated_num = None
+        self._accumulated_success_streak = 0
         self.translation_style = ""
         self.context_flag = context_flag
         self.helper = EPUBBookLoaderHelper(
@@ -126,6 +133,73 @@ class EPUBBookLoader(BaseBookLoader):
         self.bin_path = f"{Path(epub_name).parent}/.{Path(epub_name).stem}.temp.bin"
         if self.resume:
             self.load_state()
+
+    def _estimate_tokens(self, text):
+        return num_tokens_from_text(text, self.token_estimator_model)
+
+    @staticmethod
+    def _is_gateway_timeout_like_error(err):
+        msg = str(err).lower()
+        gateway_patterns = [
+            "gateway time-out",
+            "gateway timeout",
+            "error code 504",
+            "internalservererror",
+            "request timed out",
+            "timed out",
+            "timeout",
+            " 504",
+        ]
+        return any(pattern in msg for pattern in gateway_patterns)
+
+    def _consume_gateway_timeout_events(self):
+        consume = getattr(self.translate_model, "consume_gateway_timeout_events", None)
+        if not callable(consume):
+            return 0
+        try:
+            events = int(consume())
+        except Exception:
+            return 0
+        return max(0, events)
+
+    def _tune_accumulated_budget(self, had_gateway_timeout):
+        if self.accumulated_num <= 1:
+            return
+
+        if self._dynamic_accumulated_num is None:
+            self._dynamic_accumulated_num = max(2, int(self.accumulated_num))
+
+        min_num = max(2, min(int(self.accumulated_num), int(self.accumulated_min_num)))
+
+        if had_gateway_timeout:
+            self._accumulated_success_streak = 0
+            previous = self._dynamic_accumulated_num
+            reduced = max(min_num, int(previous * self.accumulated_backoff_factor))
+            if reduced < previous:
+                self._dynamic_accumulated_num = reduced
+                print(
+                    "Gateway timeout observed, lower accumulated_num "
+                    f"from {previous} to {reduced}"
+                )
+            return
+
+        self._accumulated_success_streak += 1
+        if (
+            self._dynamic_accumulated_num < self.accumulated_num
+            and self._accumulated_success_streak >= self.accumulated_recover_successes
+        ):
+            previous = self._dynamic_accumulated_num
+            increased = min(
+                int(self.accumulated_num),
+                max(previous + 1, int(previous * self.accumulated_recover_factor)),
+            )
+            if increased > previous:
+                self._dynamic_accumulated_num = increased
+                print(
+                    "Batch traffic stabilized, raise accumulated_num "
+                    f"from {previous} to {increased}"
+                )
+            self._accumulated_success_streak = 0
 
     @staticmethod
     def _is_special_text(text):
@@ -300,11 +374,105 @@ class EPUBBookLoader(BaseBookLoader):
             self._save_progress()
         return index
 
-    def translate_paragraphs_acc(self, p_list, send_num):
+    def _save_resume_text(self, index, translated_text):
+        if index < len(self.p_to_save):
+            self.p_to_save[index] = translated_text
+        else:
+            self.p_to_save.append(translated_text)
+        index += 1
+        if index % 20 == 0:
+            self._save_progress()
+        return index
+
+    def _apply_translation(self, paragraph, translated_text, index):
+        translated_text = "" if translated_text is None else translated_text
+        self.helper.insert_trans(
+            paragraph, translated_text, self.translation_style, self.single_translate
+        )
+        return self._save_resume_text(index, translated_text)
+
+    def translate_paragraphs_acc(self, p_list, send_num, index, p_to_save_len):
         count = 0
         wait_p_list = []
-        for i in range(len(p_list)):
-            p = p_list[i]
+        current_send_num = max(2, int(send_num))
+        if self._dynamic_accumulated_num is not None:
+            current_send_num = max(2, int(self._dynamic_accumulated_num))
+        else:
+            self._dynamic_accumulated_num = current_send_num
+
+        def translate_pending_with_backoff(pending):
+            nonlocal current_send_num
+            try:
+                translated_list = self.translate_model.translate_list(pending)
+            except Exception as err:
+                if not self._is_gateway_timeout_like_error(err):
+                    raise
+
+                self._tune_accumulated_budget(had_gateway_timeout=True)
+                current_send_num = max(
+                    2, int(self._dynamic_accumulated_num or current_send_num)
+                )
+
+                if len(pending) == 1:
+                    paragraph = pending[0]
+                    paragraph_text = (
+                        paragraph.text if hasattr(paragraph, "text") else str(paragraph)
+                    )
+                    single_result = self.translate_model.translate(paragraph_text)
+                    gateway_events = self._consume_gateway_timeout_events()
+                    self._tune_accumulated_budget(gateway_events > 0)
+                    current_send_num = max(
+                        2, int(self._dynamic_accumulated_num or current_send_num)
+                    )
+                    return [single_result]
+
+                split_index = max(1, len(pending) // 2)
+                left = pending[:split_index]
+                right = pending[split_index:]
+                print(
+                    "Gateway timeout in batch, retrying with smaller groups: "
+                    f"{len(left)} + {len(right)}"
+                )
+                return translate_pending_with_backoff(
+                    left
+                ) + translate_pending_with_backoff(right)
+
+            gateway_events = self._consume_gateway_timeout_events()
+            self._tune_accumulated_budget(gateway_events > 0)
+            current_send_num = max(2, int(self._dynamic_accumulated_num or current_send_num))
+            return translated_list
+
+        def flush_waiting_paragraphs():
+            nonlocal index, count
+            if not wait_p_list:
+                count = 0
+                return
+
+            pending = list(wait_p_list)
+            wait_p_list.clear()
+            count = 0
+
+            # Resume from saved progress first.
+            while self.resume and index < p_to_save_len and pending:
+                paragraph = pending.pop(0)
+                saved_text = self.p_to_save[index]
+                index = self._apply_translation(paragraph, saved_text, index)
+
+            if not pending:
+                return
+
+            translated_list = translate_pending_with_backoff(pending)
+            for i, paragraph in enumerate(pending):
+                translated_text = (
+                    shorter_result_link(translated_list[i])
+                    if i < len(translated_list)
+                    else ""
+                )
+                index = self._apply_translation(paragraph, translated_text, index)
+
+        for i, p in enumerate(p_list):
+            if self.is_test and index >= self.test_num:
+                break
             print(f"translating {i}/{len(p_list)}")
             temp_p = copy(p)
 
@@ -318,27 +486,35 @@ class EPUBBookLoader(BaseBookLoader):
             if any(
                 [not p.text, self._is_special_text(temp_p.text), not_trans(temp_p.text)]
             ):
-                if i == len(p_list) - 1:
-                    self.helper.deal_old(wait_p_list, self.single_translate)
                 continue
-            length = num_tokens_from_text(temp_p.text)
-            if length > send_num:
-                self.helper.deal_new(p, wait_p_list, self.single_translate)
-                continue
-            if i == len(p_list) - 1:
-                if count + length < send_num:
-                    wait_p_list.append(p)
-                    self.helper.deal_old(wait_p_list, self.single_translate)
+
+            length = self._estimate_tokens(temp_p.text)
+
+            # Too long for accumulation: flush waiting list and translate this one separately.
+            if length > current_send_num:
+                flush_waiting_paragraphs()
+                if self.resume and index < p_to_save_len:
+                    translated_text = self.p_to_save[index]
                 else:
-                    self.helper.deal_new(p, wait_p_list, self.single_translate)
-                break
-            if count + length < send_num:
-                count += length
-                wait_p_list.append(p)
-            else:
-                self.helper.deal_old(wait_p_list, self.single_translate)
-                wait_p_list.append(p)
-                count = length
+                    translated_text = self.translate_model.translate(p.text)
+                    gateway_events = self._consume_gateway_timeout_events()
+                    self._tune_accumulated_budget(gateway_events > 0)
+                    current_send_num = max(
+                        2, int(self._dynamic_accumulated_num or current_send_num)
+                    )
+                index = self._apply_translation(p, translated_text, index)
+                continue
+
+            # If adding this paragraph exceeds the threshold, flush first.
+            if wait_p_list and (count + length >= current_send_num):
+                flush_waiting_paragraphs()
+
+            wait_p_list.append(p)
+            count += length
+
+        flush_waiting_paragraphs()
+        self._dynamic_accumulated_num = current_send_num
+        return index
 
     def get_item(self, book, name):
         for item in book.get_items():
@@ -519,7 +695,7 @@ class EPUBBookLoader(BaseBookLoader):
 
             print("------------------------------------------------------")
             print(f"dealing {item.file_name} ...")
-            self.translate_paragraphs_acc(p_list, send_num)
+            index = self.translate_paragraphs_acc(p_list, send_num, index, p_to_save_len)
         else:
             is_test_done = self.is_test and index > self.test_num
             p_block = []
@@ -533,7 +709,7 @@ class EPUBBookLoader(BaseBookLoader):
 
                 new_p = self._extract_paragraph(copy(p))
                 if self.single_translate and self.block_size > 0:
-                    p_len = num_tokens_from_text(new_p.text)
+                    p_len = self._estimate_tokens(new_p.text)
                     block_len += p_len
                     if block_len > self.block_size:
                         index = self._process_combined_paragraph(
@@ -717,7 +893,6 @@ class EPUBBookLoader(BaseBookLoader):
         chapter_translated_list,
     ):
         """Apply accumulated_num logic for a single chapter in parallel mode with independent context."""
-        from book_maker.utils import num_tokens_from_text
         from .helper import not_trans
 
         count = 0
@@ -814,7 +989,7 @@ class EPUBBookLoader(BaseBookLoader):
                     chapter_helper.deal_old(wait_p_list, self.single_translate)
                 continue
 
-            length = num_tokens_from_text(temp_p.text)
+            length = self._estimate_tokens(temp_p.text)
             if length > send_num:
                 chapter_helper.deal_new(p, wait_p_list, self.single_translate)
                 continue
@@ -989,14 +1164,19 @@ class EPUBBookLoader(BaseBookLoader):
                 pbar.close()
         except KeyboardInterrupt as e:
             print(e)
-            if self.accumulated_num == 1:
-                print("you can resume it next time")
-                self._save_progress()
-                self._save_temp_book()
+            print("you can resume it next time")
+            self._save_progress()
+            self._save_temp_book()
             sys.exit(0)
         except Exception:
             traceback.print_exc()
-            sys.exit(0)
+            print("save progress for resume ...")
+            try:
+                self._save_progress()
+                self._save_temp_book()
+            except Exception as save_error:
+                print(f"save progress failed: {save_error}")
+            sys.exit(1)
 
     def load_state(self):
         try:
