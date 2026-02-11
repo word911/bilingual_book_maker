@@ -1,12 +1,21 @@
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 from book_maker.utils import prompt_config_to_kwargs
 
 from .base_loader import BaseBookLoader
 
 
 class MarkdownBookLoader(BaseBookLoader):
+    @staticmethod
+    def _ui_log(message):
+        try:
+            tqdm.write(message)
+        except Exception:
+            print(message)
+
     def __init__(
         self,
         md_name,
@@ -95,6 +104,7 @@ class MarkdownBookLoader(BaseBookLoader):
                 for i in range(0, len(self.md_paragraphs), self.batch_size)
             ]
             for paragraphs in sliced_list:
+                self.runtime_checkpoint()
                 batch_text = "\n\n".join(paragraphs)
                 if self._is_special_text(batch_text):
                     continue
@@ -104,15 +114,16 @@ class MarkdownBookLoader(BaseBookLoader):
                         retry_count = 0
                         while retry_count < max_retries:
                             try:
+                                self.runtime_checkpoint()
                                 temp = self.translate_model.translate(batch_text)
                                 break
                             except AttributeError as ae:
-                                print(f"翻译出错: {ae}")
+                                self._ui_log(f"翻译出错: {ae}")
                                 retry_count += 1
                                 if retry_count == max_retries:
                                     raise Exception("翻译模型初始化失败") from ae
                     except Exception as e:
-                        print(f"翻译过程中出错: {e}")
+                        self._ui_log(f"翻译过程中出错: {e}")
                         raise Exception("翻译过程中出现错误") from e
 
                     self.p_to_save.append(temp)
@@ -127,13 +138,22 @@ class MarkdownBookLoader(BaseBookLoader):
                 f"{Path(self.md_name).parent}/{Path(self.md_name).stem}_bilingual.md",
                 self.bilingual_result,
             )
+            self._ui_log(
+                f"[DONE] Translation completed. Output file: "
+                f"{Path(self.md_name).parent}/{Path(self.md_name).stem}_bilingual.md"
+            )
 
         except (KeyboardInterrupt, Exception) as e:
-            print(f"发生错误: {e}")
-            print("程序将保存进度，您可以稍后继续")
+            self._ui_log(f"发生错误: {e}")
+            self._ui_log("程序将保存进度，您可以稍后继续")
             self._save_progress()
             self._save_temp_book()
+            self._ui_log(
+                f"[TUI] Checkpoint saved: {self.runtime_checkpoint_path()}"
+            )
             sys.exit(1)  # 使用非零退出码表示错误
+        finally:
+            self.teardown_runtime_control()
 
     def _save_temp_book(self):
         index = 0

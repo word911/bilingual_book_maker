@@ -493,6 +493,12 @@ So you are close to reaching the limit. You have to choose your own value, there
         default=1,
         help="Number of parallel workers for EPUB chapter processing. Use 2-4 for better performance. Default: 1",
     )
+    parser.add_argument(
+        "--no-tui",
+        dest="no_tui",
+        action="store_true",
+        help="disable interactive TUI controls (default is enabled)",
+    )
 
     options = parser.parse_args()
     if options.rpm < 0:
@@ -663,6 +669,8 @@ So you are close to reaching the limit. You have to choose your own value, there
         source_lang=options.source_lang,
         parallel_workers=options.parallel_workers,
     )
+    if hasattr(e, "setup_runtime_control"):
+        e.setup_runtime_control(tui_enabled=not options.no_tui)
     if hasattr(e.translate_model, "set_gateway_cooldown"):
         e.translate_model.set_gateway_cooldown(
             options.gateway_cooldown_threshold,

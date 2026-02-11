@@ -1,4 +1,5 @@
 import pickle
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -134,3 +135,46 @@ def test_epub_prints_completion_summary(tmp_path, capsys):
     assert "resume_test_bilingual.epub" in captured.out
     assert "translating " not in captured.out
     assert "plist len =" not in captured.out
+
+
+def test_epub_preserves_meta_inf_layout_files(tmp_path):
+    epub_path = tmp_path / "resume_test.epub"
+    _create_epub_with_paragraphs(epub_path)
+
+    display_options_path = "META-INF/com.apple.ibooks.display-options.xml"
+    display_options_content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<display_options><platform name=\"*\">"
+        "<option name=\"specified-fonts\">true</option>"
+        "</platform></display_options>"
+    )
+
+    with zipfile.ZipFile(epub_path, "a") as src_zip:
+        src_zip.writestr(display_options_path, display_options_content)
+        container_xml = src_zip.read("META-INF/container.xml").decode(
+            "utf-8", errors="ignore"
+        )
+
+    ResumeFlakyModel.reset(fail_enabled=False)
+    loader = EPUBBookLoader(
+        str(epub_path),
+        ResumeFlakyModel,
+        key="test-key",
+        resume=False,
+        language="zh-hans",
+    )
+    loader.make_bilingual_book()
+
+    output_path = tmp_path / "resume_test_bilingual.epub"
+    assert output_path.exists()
+
+    with zipfile.ZipFile(output_path, "r") as out_zip:
+        assert display_options_path in out_zip.namelist()
+        assert (
+            out_zip.read(display_options_path).decode("utf-8", errors="ignore")
+            == display_options_content
+        )
+        assert (
+            out_zip.read("META-INF/container.xml").decode("utf-8", errors="ignore")
+            == container_xml
+        )

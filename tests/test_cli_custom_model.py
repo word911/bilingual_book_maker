@@ -52,8 +52,12 @@ class DummyLoader:
         self.accumulated_backoff_factor = None
         self.accumulated_recover_factor = None
         self.accumulated_recover_successes = None
+        self.runtime_control_calls = []
         self.translate_model = model(key, language, api_base=model_api_base)
         DummyLoader.last_instance = self
+
+    def setup_runtime_control(self, tui_enabled=True):
+        self.runtime_control_calls.append(tui_enabled)
 
     def make_bilingual_book(self):
         return
@@ -226,3 +230,60 @@ def test_cli_sets_accumulated_adaptive_options(monkeypatch, tmp_path):
     assert DummyLoader.last_instance.accumulated_backoff_factor == 0.6
     assert DummyLoader.last_instance.accumulated_recover_factor == 1.25
     assert DummyLoader.last_instance.accumulated_recover_successes == 4
+
+
+def test_cli_enables_tui_by_default(monkeypatch, tmp_path):
+    test_book = tmp_path / "demo.txt"
+    test_book.write_text("hello", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "MODEL_DICT", {"openai": DummyTranslator})
+    monkeypatch.setattr(cli, "BOOK_LOADER_DICT", {"txt": DummyLoader})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bbook_maker",
+            "--book_name",
+            str(test_book),
+            "--openai_key",
+            "test-key",
+            "--model",
+            "openai",
+            "--model_list",
+            "gpt-4o-mini",
+        ],
+    )
+
+    cli.main()
+
+    assert DummyLoader.last_instance is not None
+    assert DummyLoader.last_instance.runtime_control_calls == [True]
+
+
+def test_cli_disables_tui_when_no_tui_flag_is_set(monkeypatch, tmp_path):
+    test_book = tmp_path / "demo.txt"
+    test_book.write_text("hello", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "MODEL_DICT", {"openai": DummyTranslator})
+    monkeypatch.setattr(cli, "BOOK_LOADER_DICT", {"txt": DummyLoader})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bbook_maker",
+            "--book_name",
+            str(test_book),
+            "--openai_key",
+            "test-key",
+            "--model",
+            "openai",
+            "--model_list",
+            "gpt-4o-mini",
+            "--no-tui",
+        ],
+    )
+
+    cli.main()
+
+    assert DummyLoader.last_instance is not None
+    assert DummyLoader.last_instance.runtime_control_calls == [False]

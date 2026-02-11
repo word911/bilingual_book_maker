@@ -115,10 +115,16 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 
 - 翻译完会生成一本 `{book_name}_bilingual.epub` 的双语书
 - 如果出现了错误或使用 `CTRL+C` 中断命令，不想接下来继续翻译了，会生成一本 `{book_name}_bilingual_temp.epub` 的书，直接改成你想要的名字就可以了
+- EPUB 输出会尽量保留原书打包结构与资源（`META-INF`、container 路径、字体加密声明、CSS/图片），仅替换已翻译章节内容，从而尽量保持原书的图片尺寸和页边距效果。
 
 ### 运行输出说明（EPUB）
 
 - 出现 `Found checkpoint file ... Auto resume enabled.` 表示检测到本地断点文件并自动开启续翻。
+- EPUB/TXT/PDF/SRT/MD 默认启用 TUI（仅在交互式终端）。可使用 `--no-tui` 关闭。
+- TUI 快捷键：
+  - `p`：暂停
+  - `c`：继续
+  - `q`：保存断点并退出（终端会提示断点路径）
 - `[RUN] ...`：启动阶段一次性打印关键开关状态（续翻、并行、累计翻译、自适应降档、上下文、测试模式等）。
 - `[CHAPTER i/n] ...`：每章一行摘要，不再逐段刷屏。
 - 进度条：
@@ -128,6 +134,7 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - `[WARN] ...`：重试告警只展示精简信息（状态码如 `429/503`、可选 `request_id`）。
   - 完整返回内容写入 `log/provider_error.log`。
 - `[DONE] ...`：结束时打印输出路径、已翻译段落数和耗时。
+- EPUB 生成阶段会保留原始打包与版式元数据，减少阅读器端样式回退。
 
 ## 参数说明
 
@@ -205,6 +212,10 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 
   使用 `--temperature` 设置 `chatgptapi`/`gpt4`/`claude`模型的temperature值.
   如 `--temperature 0.7`.
+
+- `--no-tui`:
+
+  关闭交互式 TUI 控制。默认在交互式终端启用（`p/c/q`）。
 
 - `--block_size`:
 

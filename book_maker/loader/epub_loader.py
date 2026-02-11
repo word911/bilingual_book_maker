@@ -1,8 +1,10 @@
 import os
 import pickle
+import re
 import string
 import sys
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import copy
 from pathlib import Path
@@ -221,6 +223,14 @@ class EPUBBookLoader(BaseBookLoader):
         except Exception:
             print(message)
 
+    def _runtime_translate(self, text):
+        self.runtime_checkpoint()
+        return self.translate_model.translate(text)
+
+    def _runtime_translate_list(self, paragraphs):
+        self.runtime_checkpoint()
+        return self.translate_model.translate_list(paragraphs)
+
     @staticmethod
     def _safe_progress_update(pbar, step=1):
         if pbar is None or step <= 0:
@@ -326,6 +336,53 @@ class EPUBBookLoader(BaseBookLoader):
         new_book.toc = self._fix_toc_uids(book.toc)
         return new_book
 
+    def _detect_root_dir_from_container(self):
+        try:
+            with zipfile.ZipFile(self.epub_name, "r") as src_zip:
+                container_bytes = src_zip.read("META-INF/container.xml")
+        except Exception:
+            return ""
+
+        container_text = container_bytes.decode("utf-8", errors="ignore")
+        match = re.search(r'full-path="([^"]+)"', container_text)
+        if not match:
+            return ""
+
+        rootfile_path = match.group(1).replace("\\", "/")
+        if "/" not in rootfile_path:
+            return ""
+        return rootfile_path.rsplit("/", 1)[0]
+
+    def _collect_document_replacements(self, processed_book, root_dir):
+        replacements = {}
+        for item in processed_book.get_items_of_type(ITEM_DOCUMENT):
+            file_name = item.file_name.replace("\\", "/")
+            content = item.content
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            replacements[file_name] = content
+            if root_dir:
+                replacements[f"{root_dir}/{file_name}"] = content
+        return replacements
+
+    def _write_epub_preserve_layout(self, output_path, processed_book):
+        root_dir = self._detect_root_dir_from_container()
+        replacements = self._collect_document_replacements(processed_book, root_dir)
+        replaced_count = 0
+
+        with zipfile.ZipFile(self.epub_name, "r") as src_zip:
+            with zipfile.ZipFile(output_path, "w") as out_zip:
+                for info in src_zip.infolist():
+                    name = info.filename.replace("\\", "/")
+                    content = replacements.get(name)
+                    if content is None:
+                        content = src_zip.read(info.filename)
+                    else:
+                        replaced_count += 1
+                    out_zip.writestr(info, content)
+
+        return replaced_count
+
     def _fix_toc_uids(self, toc, counter=None):
         """Fix TOC items that have uid=None to prevent TypeError when writing NCX."""
         if counter is None:
@@ -371,7 +428,7 @@ class EPUBBookLoader(BaseBookLoader):
             elif self.batch_use_flag:
                 t_text = self.translate_model.batch_translate(index)
             else:
-                t_text = self.translate_model.translate(new_p.text)
+                t_text = self._runtime_translate(new_p.text)
             if t_text is None:
                 raise RuntimeError(
                     "`t_text` is None: your translation model is not working as expected. Please check your translation model configuration."
@@ -415,7 +472,7 @@ class EPUBBookLoader(BaseBookLoader):
             index += 1
 
         if len(text) > 0:
-            translated_text = self.translate_model.translate("\n".join(text))
+            translated_text = self._runtime_translate("\n".join(text))
             translated_text = translated_text.split("\n")
             text_len = len(translated_text)
 
@@ -472,7 +529,7 @@ class EPUBBookLoader(BaseBookLoader):
         def translate_pending_with_backoff(pending):
             nonlocal current_send_num
             try:
-                translated_list = self.translate_model.translate_list(pending)
+                translated_list = self._runtime_translate_list(pending)
             except Exception as err:
                 if not self._is_gateway_timeout_like_error(err):
                     raise
@@ -487,7 +544,7 @@ class EPUBBookLoader(BaseBookLoader):
                     paragraph_text = (
                         paragraph.text if hasattr(paragraph, "text") else str(paragraph)
                     )
-                    single_result = self.translate_model.translate(paragraph_text)
+                    single_result = self._runtime_translate(paragraph_text)
                     gateway_events = self._consume_gateway_timeout_events()
                     self._tune_accumulated_budget(gateway_events > 0)
                     current_send_num = max(
@@ -513,6 +570,7 @@ class EPUBBookLoader(BaseBookLoader):
 
         def flush_waiting_paragraphs():
             nonlocal index, count
+            self.runtime_checkpoint()
             if not wait_p_list:
                 count = 0
                 return
@@ -542,6 +600,7 @@ class EPUBBookLoader(BaseBookLoader):
                 self._safe_progress_update(pbar, 1)
 
         for p in p_list:
+            self.runtime_checkpoint()
             if self.is_test and index >= self.test_num:
                 break
             temp_p = copy(p)
@@ -567,7 +626,7 @@ class EPUBBookLoader(BaseBookLoader):
                 if self.resume and index < p_to_save_len:
                     translated_text = self.p_to_save[index]
                 else:
-                    translated_text = self.translate_model.translate(p.text)
+                    translated_text = self._runtime_translate(p.text)
                     gateway_events = self._consume_gateway_timeout_events()
                     self._tune_accumulated_budget(gateway_events > 0)
                     current_send_num = max(
@@ -724,6 +783,7 @@ class EPUBBookLoader(BaseBookLoader):
         chapter_index=None,
         chapter_total=None,
     ):
+        self.runtime_checkpoint()
         if self.only_filelist != "" and item.file_name not in self.only_filelist.split(
             ","
         ):
@@ -789,6 +849,7 @@ class EPUBBookLoader(BaseBookLoader):
             p_block = []
             block_len = 0
             for p in p_list:
+                self.runtime_checkpoint()
                 if is_test_done:
                     break
                 if not p.text or self._is_special_text(p.text):
@@ -861,6 +922,7 @@ class EPUBBookLoader(BaseBookLoader):
         }
 
         try:
+            self.runtime_checkpoint()
             # Create a chapter-specific translator instance to avoid context conflicts
             # This ensures each chapter has its own independent context
             thread_translator = self._create_chapter_translator()
@@ -891,6 +953,7 @@ class EPUBBookLoader(BaseBookLoader):
             else:
                 # Process paragraphs individually for this chapter
                 for p in p_list:
+                    self.runtime_checkpoint()
                     if not p.text or self._is_special_text(p.text):
                         continue
 
@@ -944,6 +1007,7 @@ class EPUBBookLoader(BaseBookLoader):
         self, translator, text, chapter_context_list, chapter_translated_list
     ):
         """Translate text with chapter-specific context management."""
+        self.runtime_checkpoint()
         if not translator.context_flag:
             return translator.translate(text)
 
@@ -1018,6 +1082,7 @@ class EPUBBookLoader(BaseBookLoader):
                     )
 
                     # Call translate_list for consistent batch translation logic
+                    self.parent_loader.runtime_checkpoint()
                     result_txt_list = self.translator.translate_list(wait_p_list)
 
                     # Update chapter context from translator
@@ -1059,6 +1124,7 @@ class EPUBBookLoader(BaseBookLoader):
         )
 
         for i in range(len(p_list)):
+            self.runtime_checkpoint()
             p = p_list[i]
             temp_p = copy(p)
 
@@ -1284,7 +1350,13 @@ class EPUBBookLoader(BaseBookLoader):
                 self.translate_model.batch()
                 self._ui_log("[DONE] Batch translation request submitted.")
             else:
-                epub.write_epub(output_path, new_book, {})
+                replaced_count = self._write_epub_preserve_layout(output_path, new_book)
+                if replaced_count == 0:
+                    self._ui_log(
+                        "[WARN] Could not match document paths while preserving source layout; "
+                        "fallback to standard EPUB writer."
+                    )
+                    epub.write_epub(output_path, new_book, {})
                 elapsed_seconds = time.time() - start_time
                 self._ui_log("------------------------------------------------------")
                 self._ui_log(
@@ -1298,6 +1370,9 @@ class EPUBBookLoader(BaseBookLoader):
             self._ui_log("you can resume it next time")
             self._save_progress()
             self._save_temp_book()
+            self._ui_log(
+                f"[TUI] Checkpoint saved: {self.runtime_checkpoint_path()}"
+            )
             sys.exit(0)
         except Exception:
             traceback.print_exc()
@@ -1311,6 +1386,7 @@ class EPUBBookLoader(BaseBookLoader):
         finally:
             if pbar is not None:
                 pbar.close()
+            self.teardown_runtime_control()
 
     def load_state(self):
         try:

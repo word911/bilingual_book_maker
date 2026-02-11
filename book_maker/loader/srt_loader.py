@@ -6,12 +6,21 @@ import re
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 from book_maker.utils import prompt_config_to_kwargs
 
 from .base_loader import BaseBookLoader
 
 
 class SRTBookLoader(BaseBookLoader):
+    @staticmethod
+    def _ui_log(message):
+        try:
+            tqdm.write(message)
+        except Exception:
+            print(message)
+
     def __init__(
         self,
         srt_name,
@@ -133,7 +142,7 @@ class SRTBookLoader(BaseBookLoader):
 
             j = int(t[1].get("number", -1))
             if i != j:
-                print(f"check failed: {i}!={j}")
+                self._ui_log(f"check failed: {i}!={j}")
                 return False
 
         return True
@@ -160,7 +169,7 @@ class SRTBookLoader(BaseBookLoader):
 
     def make_bilingual_book(self):
         if self.accumulated_num > 512:
-            print(f"{self.accumulated_num} is too large, shrink it to 512.")
+            self._ui_log(f"{self.accumulated_num} is too large, shrink it to 512.")
             self.accumulated_num = 512
 
         try:
@@ -176,6 +185,7 @@ class SRTBookLoader(BaseBookLoader):
             sliced_list = self._get_sliced_list()
 
             for sliced in sliced_list:
+                self.runtime_checkpoint()
                 begin, end, text = sliced
 
                 if not self.resume or index + (end - begin) > p_to_save_len:
@@ -183,9 +193,10 @@ class SRTBookLoader(BaseBookLoader):
                         self.p_to_save = self.p_to_save[:index]
 
                     try:
+                        self.runtime_checkpoint()
                         temp = self.translate_model.translate(text)
                     except Exception as e:
-                        print(e)
+                        self._ui_log(str(e))
                         raise Exception("Something is wrong when translate") from e
 
                     translated_blocks = self._get_blocks_from(temp)
@@ -196,16 +207,17 @@ class SRTBookLoader(BaseBookLoader):
                         ):
                             translated_blocks = []
                             # try to translate one by one, so don't accumulate too much
-                            print(
+                            self._ui_log(
                                 f"retry it one by one:  {self.blocks[begin]['number']} - {self.blocks[end - 1]['number']}"
                             )
                             for block in self.blocks[begin:end]:
                                 try:
+                                    self.runtime_checkpoint()
                                     temp = self.translate_model.translate(
                                         self._get_block_translate(block)
                                     )
                                 except Exception as e:
-                                    print(e)
+                                    self._ui_log(str(e))
                                     raise Exception(
                                         "Something is wrong when translate"
                                     ) from e
@@ -251,11 +263,16 @@ class SRTBookLoader(BaseBookLoader):
             )
 
         except (KeyboardInterrupt, Exception) as e:
-            print(e)
-            print("you can resume it next time")
+            self._ui_log(str(e))
+            self._ui_log("you can resume it next time")
             self._save_progress()
             self._save_temp_book()
+            self._ui_log(
+                f"[TUI] Checkpoint saved: {self.runtime_checkpoint_path()}"
+            )
             sys.exit(0)
+        finally:
+            self.teardown_runtime_control()
 
     def _save_temp_book(self):
         for i, block in enumerate(self.blocks):

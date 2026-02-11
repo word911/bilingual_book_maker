@@ -129,11 +129,17 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 ## Use
 
 - Once the translation is complete, a bilingual book named `${book_name}_bilingual.epub` would be generated for EPUB inputs; for TXT/MD/SRT inputs a bilingual text (or subtitle) file named `${book_name}_bilingual.txt` (or `_bilingual.srt`) will be generated. For **PDF inputs** the tool will produce a bilingual `.txt` fallback and will also attempt to create `${book_name}_bilingual.epub` — if EPUB creation fails, the TXT fallback remains so you do not need to retranslate.
+- For EPUB output, the writer now preserves the original package layout/resources (`META-INF`, container path, embedded font metadata/encryption declarations, CSS/images) and only replaces translated document content. This keeps image size and page margins consistent with the source book.
 - If there are any errors or you wish to interrupt the translation by pressing `CTRL+C`, a temporary bilingual file (for example `{book_name}_bilingual_temp.epub` or `{book_name}_bilingual_temp.txt`) would be generated. You can simply rename it to any desired name.
 
 ### Runtime Output (EPUB)
 
 - `Found checkpoint file ... Auto resume enabled.` means resume mode was auto-enabled by a local checkpoint file.
+- TUI is enabled by default (interactive terminals) for EPUB/TXT/PDF/SRT/MD. Use `--no-tui` to disable it.
+- TUI hotkeys:
+  - `p`: pause
+  - `c`: continue
+  - `q`: save checkpoint and exit (checkpoint path is shown in terminal)
 - `[RUN] ...` prints one startup summary with key switches (resume, parallel, accumulated batching, adaptive backoff, context, test mode).
 - `[CHAPTER i/n] ...` prints one line per chapter (no paragraph-level spam).
 - Progress bars:
@@ -143,6 +149,7 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - `[WARN] ...` now shows compact retry info with HTTP status (for example `429/503`) and optional `request_id`.
   - Full provider error payload is written to `log/provider_error.log`.
 - `[DONE] ...` prints final output path, translated paragraph count, and elapsed time.
+- On EPUB, output generation preserves source packaging/layout metadata to reduce reader-side style regressions.
 
 ## Params
 
@@ -246,6 +253,10 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - `--parallel-workers`:
 
   Use `--parallel-workers` to enable parallel EPUB chapter processing. Values greater than `1` spin up multiple workers (recommended: `2-4`) and automatically fall back to sequential mode for single-chapter books.
+
+- `--no-tui`:
+
+  Disable interactive runtime controls. By default, interactive terminals enable TUI controls (`p/c/q`).
 
 - `--temperature`:
 

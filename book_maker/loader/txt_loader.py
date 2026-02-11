@@ -1,12 +1,21 @@
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 from book_maker.utils import prompt_config_to_kwargs
 
 from .base_loader import BaseBookLoader
 
 
 class TXTBookLoader(BaseBookLoader):
+    @staticmethod
+    def _ui_log(message):
+        try:
+            tqdm.write(message)
+        except Exception:
+            print(message)
+
     def __init__(
         self,
         txt_name,
@@ -72,15 +81,17 @@ class TXTBookLoader(BaseBookLoader):
                 for i in range(0, len(self.origin_book), self.batch_size)
             ]
             for i in sliced_list:
+                self.runtime_checkpoint()
                 # fix the format thanks https://github.com/tudoujunha
                 batch_text = "\n".join(i)
                 if self._is_special_text(batch_text):
                     continue
                 if not self.resume or index >= p_to_save_len:
                     try:
+                        self.runtime_checkpoint()
                         temp = self.translate_model.translate(batch_text)
                     except Exception as e:
-                        print(e)
+                        self._ui_log(str(e))
                         raise Exception("Something is wrong when translate") from e
                     self.p_to_save.append(temp)
                     if not self.single_translate:
@@ -94,13 +105,22 @@ class TXTBookLoader(BaseBookLoader):
                 f"{Path(self.txt_name).parent}/{Path(self.txt_name).stem}_bilingual.txt",
                 self.bilingual_result,
             )
+            self._ui_log(
+                f"[DONE] Translation completed. Output file: "
+                f"{Path(self.txt_name).parent}/{Path(self.txt_name).stem}_bilingual.txt"
+            )
 
         except (KeyboardInterrupt, Exception) as e:
-            print(e)
-            print("you can resume it next time")
+            self._ui_log(str(e))
+            self._ui_log("you can resume it next time")
             self._save_progress()
             self._save_temp_book()
+            self._ui_log(
+                f"[TUI] Checkpoint saved: {self.runtime_checkpoint_path()}"
+            )
             sys.exit(0)
+        finally:
+            self.teardown_runtime_control()
 
     def _save_temp_book(self):
         index = 0
