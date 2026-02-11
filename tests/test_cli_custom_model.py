@@ -287,3 +287,32 @@ def test_cli_disables_tui_when_no_tui_flag_is_set(monkeypatch, tmp_path):
 
     assert DummyLoader.last_instance is not None
     assert DummyLoader.last_instance.runtime_control_calls == [False]
+
+
+def test_cli_loader_created_hook_with_explicit_argv(monkeypatch, tmp_path):
+    test_book = tmp_path / "demo.txt"
+    test_book.write_text("hello", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "MODEL_DICT", {"openai": DummyTranslator})
+    monkeypatch.setattr(cli, "BOOK_LOADER_DICT", {"txt": DummyLoader})
+
+    loaded = []
+    cli.set_loader_created_hook(lambda loader: loaded.append(loader))
+    try:
+        cli.main(
+            [
+                "--book_name",
+                str(test_book),
+                "--openai_key",
+                "test-key",
+                "--model",
+                "openai",
+                "--model_list",
+                "gpt-4o-mini",
+            ]
+        )
+    finally:
+        cli.set_loader_created_hook(None)
+
+    assert DummyLoader.last_instance is not None
+    assert loaded and loaded[0] is DummyLoader.last_instance

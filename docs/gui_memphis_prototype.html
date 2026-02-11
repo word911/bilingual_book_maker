@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>bilingual_book_maker GUI - Memphis Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="preconnect"
+      href="https://fonts.googleapis.com"
+    />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              display: ["Archivo Black", "sans-serif"],
+              body: ["Barlow", "sans-serif"],
+            },
+            colors: {
+              memphisRed: "#ff6b6b",
+              memphisYellow: "#feca57",
+              memphisCyan: "#48dbfb",
+              memphisPink: "#ff9ff3",
+              memphisGreen: "#1dd1a1",
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      :root {
+        --corp-bg: #f9fafb;
+        --corp-surface: #f3f4f6;
+        --corp-border: #e5e7eb;
+        --corp-text: #111827;
+        --corp-subtext: #6b7280;
+        --corp-primary: #2563eb;
+        --corp-primary-dark: #1d4ed8;
+        --corp-success: #22c55e;
+        --corp-warning: #f59e0b;
+        --corp-error: #ef4444;
+      }
+
+      .dots-bg {
+        background-image: radial-gradient(#000 1.4px, transparent 1.4px);
+        background-size: 14px 14px;
+      }
+
+      .stripe-bg {
+        background-image: repeating-linear-gradient(
+          -35deg,
+          rgba(0, 0, 0, 0.2) 0px,
+          rgba(0, 0, 0, 0.2) 12px,
+          rgba(255, 255, 255, 0.3) 12px,
+          rgba(255, 255, 255, 0.3) 24px
+        );
+      }
+
+      .wave-bg {
+        background-image:
+          radial-gradient(circle at 18px -4px, #000 18px, transparent 18px),
+          radial-gradient(circle at 54px -4px, #000 18px, transparent 18px);
+        background-size: 72px 26px;
+        background-repeat: repeat-x;
+      }
+
+      .toggle-group {
+        display: flex;
+        gap: 0.25rem;
+        padding: 0.25rem;
+      }
+
+      .toggle-btn {
+        cursor: pointer;
+      }
+
+      .app-input::placeholder {
+        color: #6b7280;
+      }
+
+      body.theme-memphis .toggle-btn.is-selected {
+        background: #ef4444 !important;
+        color: #000000 !important;
+      }
+
+      body.theme-memphis .toggle-btn:not(.is-selected) {
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+
+      body.theme-corporate {
+        background: var(--corp-bg) !important;
+        color: var(--corp-text) !important;
+      }
+
+      body.theme-corporate #decorations,
+      body.theme-corporate .memphis-tag,
+      body.theme-corporate .wave-bg {
+        display: none !important;
+      }
+
+      body.theme-corporate .dots-bg,
+      body.theme-corporate .stripe-bg {
+        background-image: none !important;
+      }
+
+      body.theme-corporate .app-surface,
+      body.theme-corporate .app-card,
+      body.theme-corporate .toggle-group,
+      body.theme-corporate .app-btn,
+      body.theme-corporate .app-input,
+      body.theme-corporate .app-progress-track {
+        border-width: 1px !important;
+        border-color: var(--corp-border) !important;
+        border-radius: 0.75rem !important;
+      }
+
+      body.theme-corporate .app-surface,
+      body.theme-corporate .app-card,
+      body.theme-corporate .toggle-group {
+        background: var(--corp-surface) !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+      }
+
+      body.theme-corporate .app-surface,
+      body.theme-corporate .app-card {
+        padding: 1.5rem !important;
+      }
+
+      body.theme-corporate .font-display {
+        font-family: "Barlow", sans-serif !important;
+        font-weight: 700 !important;
+        letter-spacing: 0 !important;
+      }
+
+      body.theme-corporate .app-input {
+        background: #f9fafb !important;
+        color: var(--corp-text) !important;
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+      }
+
+      body.theme-corporate .app-label {
+        color: var(--corp-subtext) !important;
+      }
+
+      body.theme-corporate .app-btn,
+      body.theme-corporate .toggle-btn {
+        font-weight: 600 !important;
+        background-image: none !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1) !important;
+        color: var(--corp-text) !important;
+      }
+
+      body.theme-corporate .app-btn:hover,
+      body.theme-corporate .toggle-btn:hover {
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12) !important;
+      }
+
+      body.theme-corporate .app-btn:active,
+      body.theme-corporate .toggle-btn:active {
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.12) !important;
+      }
+
+      body.theme-corporate .toggle-btn.is-selected {
+        background: var(--corp-primary) !important;
+        color: #ffffff !important;
+      }
+
+      body.theme-corporate #runBtn {
+        background: var(--corp-primary) !important;
+        color: #ffffff !important;
+      }
+
+      body.theme-corporate #runBtn:hover {
+        background: var(--corp-primary-dark) !important;
+      }
+
+      body.theme-corporate #pauseBtn {
+        background: var(--corp-warning) !important;
+        color: #111827 !important;
+      }
+
+      body.theme-corporate #checkpointBtn {
+        background: var(--corp-error) !important;
+        color: #ffffff !important;
+      }
+
+      body.theme-corporate .app-status-badge {
+        background: var(--corp-success) !important;
+        color: #ffffff !important;
+      }
+
+      body.theme-corporate .app-progress-track {
+        background: #f3f4f6 !important;
+      }
+
+      body.theme-corporate .app-progress-fill-global {
+        background: var(--corp-primary) !important;
+      }
+
+      body.theme-corporate .app-progress-fill-chapter {
+        background: var(--corp-success) !important;
+      }
+
+      body.theme-corporate .app-btn:focus-visible,
+      body.theme-corporate .app-input:focus,
+      body.theme-corporate select:focus,
+      body.theme-corporate .toggle-btn:focus-visible {
+        outline: none !important;
+        box-shadow:
+          0 0 0 2px rgba(59, 130, 246, 0.55),
+          0 1px 2px rgba(15, 23, 42, 0.14) !important;
+      }
+
+      @media (max-width: 768px) {
+        body.theme-corporate .app-surface,
+        body.theme-corporate .app-card,
+        body.theme-corporate .toggle-group,
+        body.theme-corporate .app-btn {
+          box-shadow: 0 1px 1px rgba(15, 23, 42, 0.08) !important;
+        }
+      }
+    </style>
+  </head>
+  <body class="theme-memphis min-h-screen bg-yellow-400 font-body text-black overflow-x-hidden">
+    <div id="decorations" class="pointer-events-none fixed inset-0">
+      <div class="absolute -left-16 top-8 h-44 w-44 rounded-full bg-pink-300 border-4 border-black rotate-12"></div>
+      <div class="absolute right-12 top-8 h-20 w-20 bg-cyan-400 border-4 border-black rotate-45"></div>
+      <div
+        class="absolute left-[8%] top-44 w-0 h-0 border-l-[34px] border-l-transparent border-r-[34px] border-r-transparent border-b-[64px] border-b-red-500"
+      ></div>
+      <div class="absolute right-[18%] top-[36%] h-20 w-20 rounded-full bg-green-400 border-4 border-black"></div>
+      <div class="absolute -right-10 bottom-16 h-28 w-28 bg-red-500 border-4 border-black rotate-12"></div>
+    </div>
+
+    <main class="relative z-10 px-4 py-4 md:py-6 md:px-8 lg:px-10">
+      <div class="mx-auto max-w-[1280px]">
+        <header class="mb-6 md:mb-7">
+          <div class="app-surface shadow relative border-4 border-black bg-cyan-400 shadow-[6px_6px_0px_#000] p-6">
+            <div class="memphis-tag absolute -top-4 right-5 rotate-6 border-4 border-black bg-pink-300 px-3 py-1 text-xs font-black">
+              MEMPHIS UI v1
+            </div>
+            <div class="absolute -bottom-4 left-8 wave-bg h-6 w-60"></div>
+            <div class="flex flex-wrap items-start justify-between gap-6 pr-0 md:pr-24">
+              <div class="max-w-4xl">
+                <h1
+                  class="font-display text-2xl md:text-4xl uppercase tracking-wide leading-tight"
+                  data-i18n="title"
+                >
+                  Bilingual Book Maker GUI
+                </h1>
+                <p
+                  class="mt-2 text-sm md:text-base font-bold max-w-3xl"
+                  data-i18n="subtitle"
+                >
+                  One workspace for EPUB / TXT / PDF / SRT translation with loud status signals, instant controls, and checkpoint-first workflow.
+                </p>
+              </div>
+              <div class="flex w-[188px] flex-col gap-3">
+                <div class="toggle-group w-full shrink-0 border-4 border-black bg-yellow-400 p-1">
+                  <button
+                    id="styleMemphis"
+                    class="toggle-btn app-btn shadow-sm is-selected flex-1 border-4 border-black bg-red-500 px-2 py-1 text-xs font-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    data-i18n="styleMemphis"
+                  >
+                    Memphis
+                  </button>
+                  <button
+                    id="styleCorporate"
+                    class="toggle-btn app-btn shadow-sm flex-1 border-4 border-black bg-white px-2 py-1 text-xs font-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    data-i18n="styleCorporate"
+                  >
+                    Corporate Clean
+                  </button>
+                </div>
+                <div class="toggle-group w-full shrink-0 border-4 border-black bg-yellow-400 p-1">
+                  <button
+                    id="langEn"
+                    class="toggle-btn app-btn shadow-sm is-selected flex-1 border-4 border-black bg-red-500 px-2 py-1.5 text-sm font-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    EN
+                  </button>
+                  <button
+                    id="langZh"
+                    class="toggle-btn app-btn shadow-sm flex-1 border-4 border-black bg-white px-2 py-1.5 text-sm font-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    中文
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+          <div class="xl:col-span-4 h-full">
+            <div class="app-surface shadow border-4 border-black bg-pink-300 shadow-[6px_6px_0px_#000] p-3 h-full">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="font-display text-lg uppercase" data-i18n="inputStrategy">Input + Strategy</h2>
+                <span class="memphis-tag border-4 border-black bg-yellow-400 px-2 py-1 text-xs font-black rotate-[-3deg]">STEP 1</span>
+              </div>
+
+              <div class="mt-3 grid grid-cols-4 gap-2">
+                <button class="app-btn shadow-sm col-span-1 border-4 border-black bg-cyan-400 px-2 py-1.5 font-black text-xs shadow-[6px_6px_0px_#000] focus:outline-none focus:ring-2 focus:ring-blue-500">EPUB</button>
+                <button class="app-btn shadow-sm col-span-1 border-4 border-black bg-yellow-400 px-2 py-1.5 font-black text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">TXT</button>
+                <button class="app-btn shadow-sm col-span-1 border-4 border-black bg-green-400 px-2 py-1.5 font-black text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">PDF</button>
+                <button class="app-btn shadow-sm col-span-1 border-4 border-black bg-red-500 px-2 py-1.5 font-black text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">SRT</button>
+              </div>
+
+              <div class="mt-3 app-card shadow border-4 border-black bg-white p-3 space-y-3">
+                <div>
+                  <label class="app-label block text-xs font-black uppercase tracking-wide mb-2" data-i18n="sourceFile">Source File</label>
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value="E:/books/test.epub"
+                      class="app-input w-full border-4 border-black px-3 py-1.5 text-sm font-bold bg-yellow-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button class="app-btn shadow-sm shrink-0 border-4 border-black bg-cyan-400 px-3 py-1.5 font-black text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" data-i18n="browse">
+                      Browse
+                    </button>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-3">
+                  <div>
+                    <label class="app-label block text-xs font-black uppercase tracking-wide mb-2" data-i18n="baseUrl">
+                      Base URL (Gateway)
+                    </label>
+                    <input
+                      type="text"
+                      value="https://your-gateway.example.com/v1"
+                      class="app-input w-full border-4 border-black px-3 py-1.5 text-sm font-bold bg-cyan-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label class="app-label block text-xs font-black uppercase tracking-wide mb-2" data-i18n="apiKey">
+                      API Key
+                    </label>
+                    <input
+                      type="password"
+                      value="sk-********************************"
+                      class="app-input w-full border-4 border-black px-3 py-1.5 text-sm font-bold bg-pink-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="app-label block text-xs font-black uppercase mb-2" data-i18n="model">Model</label>
+                    <select class="app-input w-full border-4 border-black px-2 py-1.5 bg-pink-50 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option>gpt-5-nano</option>
+                      <option>gpt-4o-mini</option>
+                      <option>gemini-1.5-flash</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="app-label block text-xs font-black uppercase mb-2" data-i18n="targetLang">Target Lang</label>
+                    <select class="app-input w-full border-4 border-black px-2 py-1.5 bg-cyan-50 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <option>zh-hans</option>
+                      <option>ja</option>
+                      <option>en</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="app-card shadow mt-2 border-4 border-black bg-white p-3">
+                <h3 class="font-display text-base uppercase" data-i18n="coreFeatures">Core Features</h3>
+                <div class="mt-2 grid grid-cols-2 gap-2 text-xs font-bold">
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" checked class="h-4 w-4 accent-green-600" />
+                    <span data-i18n="resumeCheckpoint">Resume checkpoint</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" checked class="h-4 w-4 accent-green-600" />
+                    <span data-i18n="adaptiveBackoff">Adaptive backoff</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" checked class="h-4 w-4 accent-green-600" />
+                    <span data-i18n="accumulatedMode">Accumulated mode</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" checked class="h-4 w-4 accent-green-600" />
+                    <span data-i18n="contextSummary">Context summary</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="xl:col-span-8 h-full">
+            <div class="app-surface shadow relative border-4 border-black bg-cyan-400 shadow-[6px_6px_0px_#000] p-5 h-full">
+              <div class="memphis-tag absolute -top-4 left-6 border-4 border-black bg-red-500 px-3 py-1 text-xs font-black rotate-[-4deg]" data-i18n="liveStatus">
+                Live Status
+              </div>
+              <div class="memphis-tag absolute -right-4 -bottom-4 h-16 w-16 bg-yellow-400 border-4 border-black rotate-45"></div>
+
+              <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="app-card shadow border-4 border-black bg-white p-4 stripe-bg">
+                  <p class="app-label text-xs font-black uppercase" data-i18n="currentStep">Current step</p>
+                  <p class="mt-2 text-lg font-display uppercase" data-i18n="translateChapters">Translate chapters</p>
+                </div>
+                <div class="app-card shadow border-4 border-black bg-white p-4">
+                  <p class="app-label text-xs font-black uppercase" data-i18n="checkpoint">Checkpoint</p>
+                  <p class="mt-2 text-sm font-bold break-all">E:/books/.test.temp.bin</p>
+                </div>
+                <div class="app-card shadow border-4 border-black bg-white p-4 dots-bg">
+                  <p class="app-label text-xs font-black uppercase" data-i18n="runtime">Runtime</p>
+                  <p class="mt-2 text-lg font-display">00:26:13</p>
+                </div>
+              </div>
+
+              <div class="app-card shadow mt-3 border-4 border-black bg-white p-4">
+                <div class="flex items-center justify-between">
+                  <h3 class="font-display text-lg uppercase" data-i18n="globalProgress">Global Progress</h3>
+                  <span class="font-black text-sm">5930 / 5935 seg</span>
+                </div>
+                <div class="app-progress-track mt-2 h-6 border-4 border-black bg-pink-100 overflow-hidden">
+                  <div class="app-progress-fill-global h-full bg-red-500 stripe-bg" style="width: 99.1%"></div>
+                </div>
+              </div>
+
+              <div class="app-card shadow mt-3 border-4 border-black bg-white p-4">
+                <div class="flex items-center justify-between">
+                  <h3 class="font-display text-lg uppercase" data-i18n="chapterProgress">Chapter Progress</h3>
+                  <span class="font-black text-sm">35 / 37 ch</span>
+                </div>
+                <div class="app-progress-track mt-2 h-6 border-4 border-black bg-cyan-100 overflow-hidden">
+                  <div class="app-progress-fill-chapter h-full bg-green-400 dots-bg" style="width: 94.6%"></div>
+                </div>
+              </div>
+
+              <div class="app-card shadow mt-3 border-4 border-black bg-yellow-100 p-4">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="font-display text-base uppercase" data-i18n="signalBoard">Signal Board</h3>
+                  <span class="app-status-badge border-4 border-black bg-green-400 px-2 py-1 text-xs font-black" data-i18n="healthy">Healthy</span>
+                </div>
+                <ul class="mt-2 text-sm font-bold space-y-1">
+                  <li data-i18n="log1">[RUN] Resume: ON (cached translations: 5400)</li>
+                  <li data-i18n="log2">[RUN] Adaptive backoff: ON (min=300, backoff=0.7)</li>
+                  <li data-i18n="log3">[WARN] status=503 Service Unavailable, retry in 2s</li>
+                  <li data-i18n="log4">[INFO] Full provider detail -&gt; log/provider_error.log</li>
+                </ul>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+        <section class="mt-4">
+          <div class="app-surface shadow relative border-4 border-black bg-red-500 shadow-[6px_6px_0px_#000] p-4">
+            <div class="memphis-tag absolute -top-4 right-10 border-4 border-black bg-yellow-400 px-3 py-1 text-xs font-black rotate-3" data-i18n="hotControls">
+              Hot Controls
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-1">
+              <button
+                id="runBtn"
+                class="app-btn shadow-sm border-4 border-black bg-green-400 px-4 py-3 text-lg font-display uppercase hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none shadow-[6px_6px_0px_#000] transition focus:outline-none focus:ring-2 focus:ring-blue-500"
+                data-i18n="startContinue"
+              >
+                Start / Continue
+              </button>
+              <button
+                id="pauseBtn"
+                class="app-btn shadow-sm border-4 border-black bg-yellow-400 px-4 py-3 text-lg font-display uppercase hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none shadow-[6px_6px_0px_#000] transition focus:outline-none focus:ring-2 focus:ring-blue-500"
+                data-i18n="pause"
+              >
+                Pause
+              </button>
+              <button
+                id="checkpointBtn"
+                class="app-btn shadow-sm border-4 border-black bg-pink-300 px-4 py-3 text-lg font-display uppercase hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none shadow-[6px_6px_0px_#000] transition focus:outline-none focus:ring-2 focus:ring-blue-500"
+                data-i18n="saveExit"
+              >
+                Save + Exit
+              </button>
+              <div class="app-card shadow border-4 border-black bg-white p-4">
+                <p class="app-label text-xs font-black uppercase" data-i18n="interactionStatus">Interaction Status</p>
+                <p id="statusText" class="mt-2 text-sm font-bold"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const i18n = {
+        en: {
+          title: "Bilingual Book Maker GUI",
+          subtitle:
+            "One workspace for EPUB / TXT / PDF / SRT translation with loud status signals, instant controls, and checkpoint-first workflow.",
+          styleMemphis: "Memphis",
+          styleCorporate: "Corporate Clean",
+          inputStrategy: "Input + Strategy",
+          sourceFile: "Source File",
+          browse: "Browse",
+          baseUrl: "Base URL (Gateway)",
+          apiKey: "API Key",
+          model: "Model",
+          targetLang: "Target Lang",
+          coreFeatures: "Core Features",
+          resumeCheckpoint: "Resume checkpoint",
+          adaptiveBackoff: "Adaptive backoff",
+          accumulatedMode: "Accumulated mode",
+          contextSummary: "Context summary",
+          liveStatus: "Live Status",
+          currentStep: "Current step",
+          translateChapters: "Translate chapters",
+          checkpoint: "Checkpoint",
+          runtime: "Runtime",
+          globalProgress: "Global Progress",
+          chapterProgress: "Chapter Progress",
+          signalBoard: "Signal Board",
+          healthy: "Healthy",
+          log1: "[RUN] Resume: ON (cached translations: 5400)",
+          log2: "[RUN] Adaptive backoff: ON (min=300, backoff=0.7)",
+          log3: "[WARN] status=503 Service Unavailable, retry in 2s",
+          log4: "[INFO] Full provider detail -> log/provider_error.log",
+          hotControls: "Hot Controls",
+          startContinue: "Start / Continue",
+          pause: "Pause",
+          saveExit: "Save + Exit",
+          interactionStatus: "Interaction Status",
+          statusRunning: "RUNNING | Press P/C/Q in terminal mode",
+          statusActive: "RUNNING | workers=3 | resume checkpoint active",
+          statusPaused: "PAUSED | click Start/Continue to resume",
+          statusExit: "EXIT REQUESTED | checkpoint saved at E:/books/.test.temp.bin",
+        },
+        zh: {
+          title: "双语图书制作器 GUI",
+          subtitle:
+            "一个工作台覆盖 EPUB / TXT / PDF / SRT 翻译，突出关键状态、交互控制与断点优先流程。",
+          styleMemphis: "孟菲斯风格",
+          styleCorporate: "企业简洁风格",
+          inputStrategy: "输入与策略",
+          sourceFile: "源文件",
+          browse: "浏览",
+          baseUrl: "Base URL（中转站地址）",
+          apiKey: "API Key（密钥）",
+          model: "模型",
+          targetLang: "目标语言",
+          coreFeatures: "核心能力",
+          resumeCheckpoint: "断点续翻",
+          adaptiveBackoff: "自动降档",
+          accumulatedMode: "累计翻译",
+          contextSummary: "上下文摘要",
+          liveStatus: "实时状态",
+          currentStep: "当前步骤",
+          translateChapters: "翻译章节中",
+          checkpoint: "断点文件",
+          runtime: "运行时长",
+          globalProgress: "全局进度",
+          chapterProgress: "章节进度",
+          signalBoard: "信号面板",
+          healthy: "正常",
+          log1: "[RUN] Resume: ON (cached translations: 5400)",
+          log2: "[RUN] Adaptive backoff: ON (min=300, backoff=0.7)",
+          log3: "[WARN] status=503 Service Unavailable, retry in 2s",
+          log4: "[INFO] Full provider detail -> log/provider_error.log",
+          hotControls: "快速控制",
+          startContinue: "开始 / 继续",
+          pause: "暂停",
+          saveExit: "保存并退出",
+          interactionStatus: "交互状态",
+          statusRunning: "运行中 | 终端可按 P/C/Q",
+          statusActive: "运行中 | workers=3 | 断点续翻已启用",
+          statusPaused: "已暂停 | 点击“开始/继续”恢复",
+          statusExit: "已请求退出 | 断点保存到 E:/books/.test.temp.bin",
+        },
+      };
+
+      const statusText = document.getElementById("statusText");
+      const runBtn = document.getElementById("runBtn");
+      const pauseBtn = document.getElementById("pauseBtn");
+      const checkpointBtn = document.getElementById("checkpointBtn");
+      const langEnBtn = document.getElementById("langEn");
+      const langZhBtn = document.getElementById("langZh");
+      const styleMemphisBtn = document.getElementById("styleMemphis");
+      const styleCorporateBtn = document.getElementById("styleCorporate");
+      let currentLang = "en";
+      let currentTheme = "memphis";
+      let statusKey = "statusRunning";
+
+      function updateLanguageButtonState() {
+        langEnBtn.classList.toggle("is-selected", currentLang === "en");
+        langZhBtn.classList.toggle("is-selected", currentLang === "zh");
+      }
+
+      function updateThemeButtonState() {
+        styleMemphisBtn.classList.toggle("is-selected", currentTheme === "memphis");
+        styleCorporateBtn.classList.toggle("is-selected", currentTheme === "corporate");
+      }
+
+      function applyTheme(theme) {
+        currentTheme = theme;
+        document.body.classList.toggle("theme-corporate", theme === "corporate");
+        document.body.classList.toggle("theme-memphis", theme === "memphis");
+        updateThemeButtonState();
+      }
+
+      function applyLanguage(lang) {
+        currentLang = lang;
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          const key = el.getAttribute("data-i18n");
+          if (i18n[currentLang][key]) {
+            el.textContent = i18n[currentLang][key];
+          }
+        });
+        statusText.textContent = i18n[currentLang][statusKey];
+        updateLanguageButtonState();
+      }
+
+      runBtn.addEventListener("click", () => {
+        statusKey = "statusActive";
+        statusText.textContent = i18n[currentLang][statusKey];
+      });
+
+      pauseBtn.addEventListener("click", () => {
+        statusKey = "statusPaused";
+        statusText.textContent = i18n[currentLang][statusKey];
+      });
+
+      checkpointBtn.addEventListener("click", () => {
+        statusKey = "statusExit";
+        statusText.textContent = i18n[currentLang][statusKey];
+      });
+
+      langEnBtn.addEventListener("click", () => applyLanguage("en"));
+      langZhBtn.addEventListener("click", () => applyLanguage("zh"));
+      styleMemphisBtn.addEventListener("click", () => applyTheme("memphis"));
+      styleCorporateBtn.addEventListener("click", () => applyTheme("corporate"));
+
+      applyLanguage("en");
+      applyTheme("memphis");
+    </script>
+  </body>
+</html>

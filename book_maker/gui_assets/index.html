@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>bbook_maker GUI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Barlow:wght@500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              display: ["Archivo Black", "sans-serif"],
+              body: ["Barlow", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      :root {
+        --corp-bg: #f9fafb;
+        --corp-surface: #f3f4f6;
+        --corp-border: #e5e7eb;
+        --corp-text: #111827;
+        --corp-subtext: #6b7280;
+        --corp-primary: #2563eb;
+      }
+
+      .dots-bg {
+        background-image: radial-gradient(#000 1.3px, transparent 1.3px);
+        background-size: 13px 13px;
+      }
+
+      .stripe-bg {
+        background-image: repeating-linear-gradient(
+          -35deg,
+          rgba(0, 0, 0, 0.2) 0px,
+          rgba(0, 0, 0, 0.2) 11px,
+          rgba(255, 255, 255, 0.3) 11px,
+          rgba(255, 255, 255, 0.3) 22px
+        );
+      }
+
+      .toggle-group {
+        display: flex;
+        gap: 0.25rem;
+      }
+
+      .toggle-btn {
+        cursor: pointer;
+      }
+
+      body.theme-memphis .toggle-btn.is-selected {
+        background: #ef4444 !important;
+        color: #000 !important;
+      }
+
+      body.theme-memphis .toggle-btn:not(.is-selected) {
+        background: #fff !important;
+        color: #000 !important;
+      }
+
+      body.theme-corporate {
+        background: var(--corp-bg) !important;
+        color: var(--corp-text) !important;
+      }
+
+      body.theme-corporate .memphis-only {
+        display: none !important;
+      }
+
+      body.theme-corporate .app-surface,
+      body.theme-corporate .app-card,
+      body.theme-corporate .toggle-group,
+      body.theme-corporate .app-btn,
+      body.theme-corporate .app-input,
+      body.theme-corporate .app-progress-track {
+        border-width: 1px !important;
+        border-color: var(--corp-border) !important;
+        border-radius: 0.75rem !important;
+      }
+
+      body.theme-corporate .app-surface,
+      body.theme-corporate .app-card,
+      body.theme-corporate .toggle-group {
+        background: var(--corp-surface) !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08) !important;
+      }
+
+      body.theme-corporate .font-display {
+        font-family: "Barlow", sans-serif !important;
+        font-weight: 700 !important;
+        letter-spacing: 0 !important;
+      }
+
+      body.theme-corporate .app-label {
+        color: var(--corp-subtext) !important;
+      }
+
+      body.theme-corporate .app-btn,
+      body.theme-corporate .toggle-btn {
+        font-weight: 600 !important;
+        background-image: none !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12) !important;
+      }
+
+      body.theme-corporate .toggle-btn.is-selected {
+        background: var(--corp-primary) !important;
+        color: #fff !important;
+      }
+
+      body.theme-corporate #runBtn {
+        background: #2563eb !important;
+        color: #fff !important;
+      }
+
+      body.theme-corporate #pauseBtn {
+        background: #f59e0b !important;
+        color: #111827 !important;
+      }
+
+      body.theme-corporate #checkpointBtn {
+        background: #ef4444 !important;
+        color: #fff !important;
+      }
+
+      .status-top-card {
+        height: 118px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .status-top-value {
+        margin-top: 0.35rem;
+        font-size: 0.92rem;
+        line-height: 1.25;
+        font-weight: 800;
+        max-height: 3.35rem;
+        overflow-y: auto;
+        word-break: break-word;
+      }
+
+      #checkpointPathValue {
+        word-break: break-all;
+      }
+
+      .signal-panel {
+        height: 260px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .signal-panel-list {
+        margin-top: 0.35rem;
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 0.3rem;
+      }
+
+      .signal-panel-list li {
+        line-height: 1.25;
+        word-break: break-word;
+      }
+
+      .side-action-btn {
+        width: 82px;
+      }
+
+      body.lang-zh {
+        font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Heiti SC", "STHeiti", "SimHei", sans-serif !important;
+      }
+
+      body.theme-memphis.lang-zh .font-display {
+        font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Heiti SC", "STHeiti", "SimHei", sans-serif !important;
+        font-weight: 800 !important;
+        letter-spacing: 0 !important;
+      }
+    </style>
+  </head>
+  <body class="theme-memphis bg-yellow-400 font-body text-black">
+    <main class="px-3 py-2 md:px-6 md:py-3">
+      <div class="mx-auto max-w-[1280px]">
+        <header class="mb-3">
+          <div class="app-surface relative border-4 border-black bg-cyan-400 p-4 shadow-[6px_6px_0px_#000]">
+            <div class="memphis-only absolute -top-4 right-5 rotate-6 border-4 border-black bg-pink-300 px-3 py-1 text-xs font-black">
+              MEMPHIS UI v1
+            </div>
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div class="max-w-4xl">
+                <h1 class="font-display text-xl uppercase leading-tight md:text-3xl" data-i18n="title">
+                  Bilingual Book Maker GUI
+                </h1>
+                <p class="mt-1 max-w-3xl text-xs font-bold md:text-sm" data-i18n="subtitle">
+                  One workspace for EPUB / TXT / PDF / SRT translation with loud status signals, instant controls, and checkpoint-first workflow.
+                </p>
+              </div>
+              <div class="flex flex-wrap justify-end gap-2">
+                <div class="toggle-group w-[188px] border-4 border-black bg-yellow-400 p-1">
+                  <button id="styleMemphis" class="toggle-btn app-btn is-selected flex-1 border-4 border-black bg-red-500 px-2 py-1 text-xs font-black" data-i18n="styleMemphis">Memphis</button>
+                  <button id="styleCorporate" class="toggle-btn app-btn flex-1 border-4 border-black bg-white px-2 py-1 text-xs font-black" data-i18n="styleCorporate">Corporate Clean</button>
+                </div>
+                <div class="toggle-group w-[188px] border-4 border-black bg-yellow-400 p-1">
+                  <button id="langEn" class="toggle-btn app-btn is-selected flex-1 border-4 border-black bg-red-500 px-2 py-1.5 text-sm font-black">EN</button>
+                  <button id="langZh" class="toggle-btn app-btn flex-1 border-4 border-black bg-white px-2 py-1.5 text-sm font-black">中文</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section class="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-12">
+          <div class="h-full xl:col-span-4">
+            <div class="app-surface h-full border-4 border-black bg-pink-300 p-2.5 shadow-[6px_6px_0px_#000]">
+              <div class="flex items-center justify-end gap-3">
+                <span class="border-4 border-black bg-yellow-400 px-2 py-1 text-xs font-black rotate-[-3deg]" data-i18n="stepBadge">STEP 1</span>
+              </div>
+
+              <div class="mt-2 grid grid-cols-4 gap-2">
+                <button data-mode="epub" class="mode-btn app-btn col-span-1 border-4 border-black bg-cyan-400 px-2 py-1.5 text-xs font-black shadow-[6px_6px_0px_#000]">EPUB</button>
+                <button data-mode="txt" class="mode-btn app-btn col-span-1 border-4 border-black bg-yellow-400 px-2 py-1.5 text-xs font-black shadow-[6px_6px_0px_#000]">TXT</button>
+                <button data-mode="pdf" class="mode-btn app-btn col-span-1 border-4 border-black bg-green-400 px-2 py-1.5 text-xs font-black shadow-[6px_6px_0px_#000]">PDF</button>
+                <button data-mode="srt" class="mode-btn app-btn col-span-1 border-4 border-black bg-red-500 px-2 py-1.5 text-xs font-black shadow-[6px_6px_0px_#000]">SRT</button>
+              </div>
+
+              <div class="app-card mt-2 space-y-2 border-4 border-black bg-white p-2.5">
+                <div>
+                  <label class="app-label mb-2 block text-xs font-black uppercase" data-i18n="sourceFile">Source File</label>
+                  <div class="flex items-center gap-2">
+                    <input id="sourceFileInput" type="text" value="" placeholder="Select a local .epub/.txt/.pdf/.srt file" class="app-input w-full border-4 border-black bg-yellow-50 px-3 py-1.5 text-sm font-bold" />
+                    <button id="browseBtn" class="side-action-btn app-btn shrink-0 border-4 border-black bg-cyan-400 px-3 py-1.5 text-xs font-black" data-i18n="browse">Browse</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="app-label mb-2 block text-xs font-black uppercase" data-i18n="savedGatewayPairs">Saved Gateway Pairs</label>
+                  <div class="flex items-center gap-2">
+                    <select id="credentialProfileSelect" class="app-input w-full border-4 border-black bg-yellow-50 px-2 py-1.5 text-sm font-bold">
+                      <option value="" data-i18n="gatewayPairPlaceholder">No saved pairs</option>
+                    </select>
+                    <button id="deleteCredentialProfileBtn" class="side-action-btn app-btn shrink-0 border-4 border-black bg-red-500 px-2 py-1.5 text-xs font-black" data-i18n="deletePair">Delete</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="app-label mb-2 block text-xs font-black uppercase" data-i18n="baseUrl">Base URL (Gateway)</label>
+                  <input id="baseUrlInput" type="text" value="https://your-gateway.example.com/v1" class="app-input w-full border-4 border-black bg-cyan-50 px-3 py-1.5 text-sm font-bold" />
+                </div>
+                <div>
+                  <label class="app-label mb-2 block text-xs font-black uppercase" data-i18n="apiKey">API Key</label>
+                  <input
+                    id="apiKeyInput"
+                    type="password"
+                    value=""
+                    placeholder="sk-..."
+                    class="app-input w-full border-4 border-black bg-pink-50 px-3 py-1.5 text-sm font-bold"
+                  />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="app-label mb-2 block text-xs font-black uppercase" data-i18n="model">Model</label>
+                    <select id="modelSelect" class="app-input w-full border-4 border-black bg-pink-50 px-2 py-1.5 text-sm font-bold">
+                      <option value="" data-i18n="modelSelectPlaceholder">Select detected model...</option>
+                    </select>
+                    <input
+                      id="modelInput"
+                      value=""
+                      placeholder="custom model id"
+                      class="app-input mt-1 hidden w-full border-4 border-black bg-pink-50 px-2 py-1.5 font-bold"
+                    />
+                    <p id="modelHint" class="mt-1 text-[11px] font-bold text-gray-700"></p>
+                  </div>
+                  <div>
+                    <label class="app-label mb-2 block text-xs font-black uppercase" data-i18n="targetLang">Target Lang</label>
+                    <select id="targetLangInput" class="app-input w-full border-4 border-black bg-cyan-50 px-2 py-1.5 font-bold">
+                      <option>zh-hans</option>
+                      <option>ja</option>
+                      <option>en</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="app-card mt-2 border-4 border-black bg-white p-2.5">
+                <div class="grid grid-cols-2 gap-2 text-xs font-bold">
+                  <label class="flex items-center gap-2"><input id="resumeCheckpointToggle" type="checkbox" checked class="h-4 w-4 accent-green-600" /><span data-i18n="resumeCheckpoint">Resume checkpoint</span></label>
+                  <label class="flex items-center gap-2"><input id="adaptiveBackoffToggle" type="checkbox" checked class="h-4 w-4 accent-green-600" /><span data-i18n="adaptiveBackoff">Adaptive backoff</span></label>
+                  <label class="flex items-center gap-2"><input id="accumulatedModeToggle" type="checkbox" checked class="h-4 w-4 accent-green-600" /><span data-i18n="accumulatedMode">Accumulated mode</span></label>
+                  <label class="flex items-center gap-2"><input id="contextSummaryToggle" type="checkbox" checked class="h-4 w-4 accent-green-600" /><span data-i18n="contextSummary">Context summary</span></label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="h-full xl:col-span-8">
+            <div class="app-surface relative h-full border-4 border-black bg-cyan-400 p-3 shadow-[6px_6px_0px_#000]">
+              <div class="memphis-only absolute -top-4 left-6 border-4 border-black bg-red-500 px-3 py-1 text-xs font-black rotate-[-4deg]" data-i18n="liveStatus">Live Status</div>
+              <div class="memphis-only absolute -bottom-4 -right-4 h-16 w-16 rotate-45 border-4 border-black bg-yellow-400"></div>
+
+              <div class="mt-2 grid grid-cols-1 gap-2 md:grid-cols-3">
+                <div class="app-card status-top-card border-4 border-black bg-white p-3">
+                  <p class="app-label text-xs font-black uppercase" data-i18n="currentStep">Current Step</p>
+                  <p id="currentStepValue" class="status-top-value" data-i18n="translateChapters">Translate chapters</p>
+                </div>
+                <div class="app-card status-top-card border-4 border-black bg-white p-3">
+                  <p class="app-label text-xs font-black uppercase" data-i18n="checkpoint">Checkpoint</p>
+                  <p id="checkpointPathValue" class="status-top-value">-</p>
+                </div>
+                <div class="app-card status-top-card border-4 border-black bg-white p-3">
+                  <p class="app-label text-xs font-black uppercase" data-i18n="runtime">Runtime</p>
+                  <p id="runtimeValue" class="status-top-value">00:00:00</p>
+                </div>
+              </div>
+
+              <div class="app-card mt-2 border-4 border-black bg-white p-3">
+                <div class="space-y-2">
+                  <div>
+                    <div class="flex items-center justify-between">
+                      <p class="app-label text-xs font-black uppercase" data-i18n="globalProgress">Global Progress</p>
+                      <span id="globalProgressText" class="text-sm font-black">0 / 0 seg</span>
+                    </div>
+                    <div class="app-progress-track mt-1 h-5 overflow-hidden border-4 border-black bg-pink-100">
+                      <div id="globalProgressFill" class="h-full bg-red-500 stripe-bg" style="width: 0%"></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="flex items-center justify-between">
+                      <p class="app-label text-xs font-black uppercase" data-i18n="chapterProgress">Chapter Progress</p>
+                      <span id="chapterProgressText" class="text-sm font-black">0 / 0 ch</span>
+                    </div>
+                    <div class="app-progress-track mt-1 h-5 overflow-hidden border-4 border-black bg-cyan-100">
+                      <div id="chapterProgressFill" class="h-full bg-green-400 dots-bg" style="width: 0%"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="app-card signal-panel mt-2 border-4 border-black bg-yellow-100 p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="font-display text-base uppercase" data-i18n="signalBoard">Signal Board</h3>
+                  <span id="healthBadge" class="border-4 border-black bg-green-400 px-2 py-1 text-xs font-black" data-i18n="healthy">Healthy</span>
+                </div>
+                <ul id="signalLogList" class="signal-panel-list space-y-1 text-xs font-light">
+                  <li>[GUI] Ready.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="mt-3">
+          <div class="app-surface relative border-4 border-black bg-red-500 p-3 shadow-[6px_6px_0px_#000]">
+            <div class="memphis-only absolute -top-4 right-10 border-4 border-black bg-yellow-400 px-3 py-1 text-xs font-black rotate-3" data-i18n="hotControls">Hot Controls</div>
+            <div class="mt-0.5 grid grid-cols-1 gap-2 md:grid-cols-4">
+              <button id="runBtn" class="app-btn border-4 border-black bg-green-400 px-4 py-2.5 text-base font-display uppercase" data-i18n="startContinue">Start / Continue</button>
+              <button id="pauseBtn" class="app-btn border-4 border-black bg-yellow-400 px-4 py-2.5 text-base font-display uppercase" data-i18n="pause">Pause</button>
+              <button id="checkpointBtn" class="app-btn border-4 border-black bg-pink-300 px-4 py-2.5 text-base font-display uppercase" data-i18n="saveExit">Save + Exit</button>
+              <div class="app-card border-4 border-black bg-white p-3">
+                <p class="app-label text-xs font-black uppercase" data-i18n="interactionStatus">Interaction Status</p>
+                <p id="statusText" class="mt-1 text-sm font-bold"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const i18n = {
+        en: {
+          title: "Bilingual Book Maker GUI",
+          subtitle:
+            "One workspace for EPUB / TXT / PDF / SRT translation with loud status signals, instant controls, and checkpoint-first workflow.",
+          styleMemphis: "Memphis",
+          styleCorporate: "Corporate Clean",
+          stepBadge: "STEP 1",
+          inputStrategy: "Input + Strategy",
+          sourceFile: "Source File",
+          browse: "Browse",
+          baseUrl: "Base URL (Gateway)",
+          apiKey: "API Key",
+          model: "Model",
+          savedGatewayPairs: "Saved Gateway Pairs",
+          gatewayPairPlaceholder: "No saved pairs",
+          deletePair: "Delete",
+          modelSelectPlaceholder: "Select detected model...",
+          customModel: "Custom model...",
+          customModelPlaceholder: "custom model id",
+          targetLang: "Target Lang",
+          coreFeatures: "Core Features",
+          resumeCheckpoint: "Resume checkpoint",
+          adaptiveBackoff: "Adaptive backoff",
+          accumulatedMode: "Accumulated mode",
+          contextSummary: "Context summary",
+          liveStatus: "Live Status",
+          currentStep: "Current Step",
+          translateChapters: "Translate chapters",
+          checkpoint: "Checkpoint",
+          runtime: "Runtime",
+          globalProgress: "Global Progress",
+          chapterProgress: "Chapter Progress",
+          progressOverview: "Progress Overview",
+          signalBoard: "Signal Board",
+          healthy: "Healthy",
+          warning: "Warning",
+          hotControls: "Hot Controls",
+          startContinue: "Start / Continue",
+          pause: "Pause",
+          saveExit: "Save + Exit",
+          interactionStatus: "Interaction Status",
+          statusIdle: "IDLE | Configure inputs and click Start",
+          statusRunning: "RUNNING | Translation in progress",
+          statusPausing: "PAUSING | Waiting current request to finish",
+          statusPaused: "PAUSED | Click Start/Continue to resume",
+          statusStopping: "STOPPING | Saving checkpoint and exiting",
+          statusCompleted: "COMPLETED | Output generated",
+          statusStopped: "STOPPED | Checkpoint saved",
+          statusError: "ERROR | See signal board for details",
+          statusNeedSource: "Please select a source file first.",
+          statusNoFile: "No file selected.",
+          browseOpening: "Opening file picker...",
+          browseTimeout: "File picker timed out. Paste file path manually.",
+          modelsDetecting: "Detecting models...",
+          modelsDetected: "Detected models:",
+          modelsNone: "No models discovered.",
+          modelsFailed: "Model discovery failed.",
+          progressSegUnit: "seg",
+          progressChUnit: "ch",
+          pairSaved: "Gateway pair saved locally.",
+          pairLoaded: "Loaded saved gateway pair.",
+          pairDeleted: "Saved gateway pair deleted.",
+          pairDeleteNone: "Select a saved pair to delete.",
+          pauseClickLog: "[GUI] Pause clicked. Waiting current request to finish before pausing.",
+          exitClickLog: "[GUI] Save+Exit clicked. Waiting current request to finish before saving checkpoint and exiting.",
+          stepIdle: "Waiting",
+        },
+        zh: {
+          title: "双语图书制作器 GUI",
+          subtitle: "一个工作台覆盖 EPUB / TXT / PDF / SRT 翻译，突出关键状态、交互控制与断点优先流程。",
+          styleMemphis: "孟菲斯风格",
+          styleCorporate: "企业简洁风格",
+          stepBadge: "步骤1",
+          inputStrategy: "输入与策略",
+          sourceFile: "源文件",
+          browse: "浏览",
+          baseUrl: "Base URL（中转站地址）",
+          apiKey: "API Key（密钥）",
+          model: "模型",
+          savedGatewayPairs: "已保存网关配对",
+          gatewayPairPlaceholder: "暂无保存配对",
+          deletePair: "删除",
+          modelSelectPlaceholder: "选择探测到的模型...",
+          customModel: "自定义模型...",
+          customModelPlaceholder: "输入自定义模型ID",
+          targetLang: "目标语言",
+          coreFeatures: "核心能力",
+          resumeCheckpoint: "断点续翻",
+          adaptiveBackoff: "自动降档",
+          accumulatedMode: "累计翻译",
+          contextSummary: "上下文摘要",
+          liveStatus: "实时状态",
+          currentStep: "当前步骤",
+          translateChapters: "翻译章节中",
+          checkpoint: "断点文件",
+          runtime: "运行时长",
+          globalProgress: "全局进度",
+          chapterProgress: "章节进度",
+          progressOverview: "进度总览",
+          signalBoard: "信号面板",
+          healthy: "正常",
+          warning: "告警",
+          hotControls: "快速控制",
+          startContinue: "开始 / 继续",
+          pause: "暂停",
+          saveExit: "保存并退出",
+          interactionStatus: "交互状态",
+          statusIdle: "待命 | 配置参数后点击开始",
+          statusRunning: "运行中 | 翻译任务正在执行",
+          statusPausing: "暂停中 | 等待当前请求结束后暂停",
+          statusPaused: "已暂停 | 点击开始/继续恢复",
+          statusStopping: "停止中 | 正在保存断点并退出",
+          statusCompleted: "已完成 | 输出文件已生成",
+          statusStopped: "已停止 | 断点已保存",
+          statusError: "错误 | 请查看信号面板",
+          statusNeedSource: "请先选择源文件。",
+          statusNoFile: "未选择文件。",
+          browseOpening: "正在打开文件选择器...",
+          browseTimeout: "文件选择器超时，请手动粘贴文件路径。",
+          modelsDetecting: "正在探测模型...",
+          modelsDetected: "侦测到的模型个数：",
+          modelsNone: "未发现可用模型。",
+          modelsFailed: "模型探测失败。",
+          progressSegUnit: "段",
+          progressChUnit: "章",
+          pairSaved: "网关配对已保存到本地。",
+          pairLoaded: "已载入保存的网关配对。",
+          pairDeleted: "已删除所选网关配对。",
+          pairDeleteNone: "请先选择要删除的配对。",
+          pauseClickLog: "[GUI] 已点击暂停。正在等待当前请求结束后进入暂停。",
+          exitClickLog: "[GUI] 已点击保存并退出。正在等待当前请求结束后保存断点并退出。",
+          stepIdle: "等待中",
+        },
+      };
+
+      const elements = {
+        statusText: document.getElementById("statusText"),
+        runBtn: document.getElementById("runBtn"),
+        pauseBtn: document.getElementById("pauseBtn"),
+        checkpointBtn: document.getElementById("checkpointBtn"),
+        langEnBtn: document.getElementById("langEn"),
+        langZhBtn: document.getElementById("langZh"),
+        styleMemphisBtn: document.getElementById("styleMemphis"),
+        styleCorporateBtn: document.getElementById("styleCorporate"),
+        modeButtons: Array.from(document.querySelectorAll(".mode-btn")),
+        sourceFileInput: document.getElementById("sourceFileInput"),
+        browseBtn: document.getElementById("browseBtn"),
+        credentialProfileSelect: document.getElementById("credentialProfileSelect"),
+        deleteCredentialProfileBtn: document.getElementById("deleteCredentialProfileBtn"),
+        baseUrlInput: document.getElementById("baseUrlInput"),
+        apiKeyInput: document.getElementById("apiKeyInput"),
+        modelInput: document.getElementById("modelInput"),
+        modelSelect: document.getElementById("modelSelect"),
+        modelHint: document.getElementById("modelHint"),
+        targetLangInput: document.getElementById("targetLangInput"),
+        resumeCheckpointToggle: document.getElementById("resumeCheckpointToggle"),
+        adaptiveBackoffToggle: document.getElementById("adaptiveBackoffToggle"),
+        accumulatedModeToggle: document.getElementById("accumulatedModeToggle"),
+        contextSummaryToggle: document.getElementById("contextSummaryToggle"),
+        currentStepValue: document.getElementById("currentStepValue"),
+        checkpointPathValue: document.getElementById("checkpointPathValue"),
+        runtimeValue: document.getElementById("runtimeValue"),
+        globalProgressText: document.getElementById("globalProgressText"),
+        chapterProgressText: document.getElementById("chapterProgressText"),
+        globalProgressFill: document.getElementById("globalProgressFill"),
+        chapterProgressFill: document.getElementById("chapterProgressFill"),
+        signalLogList: document.getElementById("signalLogList"),
+        healthBadge: document.getElementById("healthBadge"),
+      };
+
+      let currentLang = "en";
+      let currentTheme = "memphis";
+      let currentStatus = "idle";
+      let selectedMode = "epub";
+      let discoverModelsTimer = null;
+      let lastModelDiscoveryFingerprint = "";
+      let discoveredModels = [];
+      let lastStateSnapshot = null;
+      const CREDENTIAL_STORAGE_KEY = "bbm_gateway_pairs_v1";
+      const CREDENTIAL_LAST_KEY = "bbm_gateway_pairs_last";
+      let credentialProfiles = [];
+      let baseEditedSincePairSave = false;
+      let keyEditedSincePairSave = false;
+
+      function t(key) {
+        return i18n[currentLang][key] || key;
+      }
+
+      function updateLanguageButtonState() {
+        elements.langEnBtn.classList.toggle("is-selected", currentLang === "en");
+        elements.langZhBtn.classList.toggle("is-selected", currentLang === "zh");
+      }
+
+      function updateThemeButtonState() {
+        elements.styleMemphisBtn.classList.toggle("is-selected", currentTheme === "memphis");
+        elements.styleCorporateBtn.classList.toggle("is-selected", currentTheme === "corporate");
+      }
+
+      function updateModeButtons() {
+        elements.modeButtons.forEach((btn) => {
+          const active = btn.dataset.mode === selectedMode;
+          btn.classList.toggle("translate-x-[2px]", active);
+          btn.classList.toggle("translate-y-[2px]", active);
+          btn.classList.toggle("shadow-none", active);
+        });
+      }
+
+      function applyTheme(theme) {
+        currentTheme = theme;
+        document.body.classList.toggle("theme-corporate", theme === "corporate");
+        document.body.classList.toggle("theme-memphis", theme === "memphis");
+        updateThemeButtonState();
+      }
+
+      function applyLanguage(lang) {
+        currentLang = lang;
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        document.body.classList.toggle("lang-zh", lang === "zh");
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          const key = el.getAttribute("data-i18n");
+          if (i18n[currentLang][key]) {
+            el.textContent = i18n[currentLang][key];
+          }
+        });
+        elements.statusText.textContent = statusLine(currentStatus);
+        if (elements.modelHint.textContent.trim()) {
+          const isError = elements.modelHint.classList.contains("text-red-700");
+          if (isError) {
+            setModelHint(t("modelsFailed"), true);
+          }
+        }
+        renderGatewayPairs();
+        updateModelList(discoveredModels);
+        if (lastStateSnapshot) {
+          renderState(lastStateSnapshot);
+        }
+        updateLanguageButtonState();
+      }
+
+      function statusLine(status, message = "") {
+        if (message) return message;
+        if (status === "running") return t("statusRunning");
+        if (status === "pausing") return t("statusPausing");
+        if (status === "paused") return t("statusPaused");
+        if (status === "stopping") return t("statusStopping");
+        if (status === "completed") return t("statusCompleted");
+        if (status === "stopped") return t("statusStopped");
+        if (status === "error") return t("statusError");
+        return t("statusIdle");
+      }
+
+      function appendSignalLogLine(text) {
+        if (!text) return;
+        const li = document.createElement("li");
+        li.textContent = text;
+        elements.signalLogList.appendChild(li);
+        elements.signalLogList.scrollTop = elements.signalLogList.scrollHeight;
+      }
+
+      function formatRuntime(totalSeconds) {
+        const sec = Math.max(0, Number(totalSeconds) || 0);
+        const h = String(Math.floor(sec / 3600)).padStart(2, "0");
+        const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+        const s = String(sec % 60).padStart(2, "0");
+        return `${h}:${m}:${s}`;
+      }
+
+      function inferModeFromPath(path) {
+        const text = String(path || "").trim().toLowerCase();
+        if (text.endsWith(".txt")) return "txt";
+        if (text.endsWith(".pdf")) return "pdf";
+        if (text.endsWith(".srt")) return "srt";
+        return "epub";
+      }
+
+      function setSourcePathField(path) {
+        const text = String(path || "").trim();
+        elements.sourceFileInput.value = text;
+        elements.sourceFileInput.title = text;
+        // Long Windows paths share the same prefix; show the tail filename.
+        requestAnimationFrame(() => {
+          elements.sourceFileInput.scrollLeft = elements.sourceFileInput.scrollWidth;
+        });
+      }
+
+      function buildPayload() {
+        const selectedModel = String(elements.modelSelect.value || "").trim();
+        const modelValue =
+          selectedModel && selectedModel !== "__custom__"
+            ? selectedModel
+            : elements.modelInput.value.trim();
+        return {
+          source_path: elements.sourceFileInput.value.trim(),
+          mode: selectedMode,
+          model: modelValue,
+          target_lang: elements.targetLangInput.value.trim(),
+          api_base: elements.baseUrlInput.value.trim(),
+          api_key: elements.apiKeyInput.value.trim(),
+          resume: elements.resumeCheckpointToggle.checked,
+          adaptive_backoff: elements.adaptiveBackoffToggle.checked,
+          accumulated_mode: elements.accumulatedModeToggle.checked,
+          context_summary: elements.contextSummaryToggle.checked,
+        };
+      }
+
+      function setModelHint(text, isError = false) {
+        elements.modelHint.textContent = text || "";
+        elements.modelHint.classList.toggle("text-red-700", isError);
+        elements.modelHint.classList.toggle("text-gray-700", !isError);
+      }
+
+      function markPairDraftSaved() {
+        baseEditedSincePairSave = false;
+        keyEditedSincePairSave = false;
+      }
+
+      function shouldPersistPair(baseUrl, apiKey) {
+        const normalizedBase = String(baseUrl || "").trim();
+        const normalizedKey = String(apiKey || "").trim();
+        if (!normalizedBase || !normalizedKey) {
+          return false;
+        }
+        // Guard against accidental "new base + old key" persistence.
+        if (baseEditedSincePairSave && !keyEditedSincePairSave) {
+          return false;
+        }
+        return true;
+      }
+
+      function safeLocalStorageGet(key, fallback = "") {
+        try {
+          return localStorage.getItem(key) || fallback;
+        } catch (err) {
+          return fallback;
+        }
+      }
+
+      function safeLocalStorageSet(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch (err) {
+          // ignore localStorage failures
+        }
+      }
+
+      function maskKey(apiKey) {
+        const key = String(apiKey || "").trim();
+        if (!key) return "****";
+        const tail = key.slice(-4);
+        return `***${tail}`;
+      }
+
+      function shortBase(baseUrl) {
+        const text = String(baseUrl || "").trim();
+        if (!text) return "";
+        try {
+          const parsed = new URL(text);
+          return `${parsed.host}${parsed.pathname}`.replace(/\/+$/, "");
+        } catch (err) {
+          return text.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+        }
+      }
+
+      function gatewayPairId(baseUrl, apiKey) {
+        return `${String(baseUrl || "").trim()}|${String(apiKey || "").trim()}`;
+      }
+
+      function loadGatewayPairs() {
+        const raw = safeLocalStorageGet(CREDENTIAL_STORAGE_KEY, "[]");
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed
+            .filter((item) => item && item.baseUrl && item.apiKey)
+            .map((item) => ({
+              id: item.id || gatewayPairId(item.baseUrl, item.apiKey),
+              baseUrl: String(item.baseUrl),
+              apiKey: String(item.apiKey),
+              updatedAt: Number(item.updatedAt || Date.now()),
+            }))
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, 20);
+        } catch (err) {
+          return [];
+        }
+      }
+
+      function saveGatewayPairs() {
+        safeLocalStorageSet(CREDENTIAL_STORAGE_KEY, JSON.stringify(credentialProfiles.slice(0, 20)));
+      }
+
+      function renderGatewayPairs() {
+        const previousValue = elements.credentialProfileSelect.value;
+        elements.credentialProfileSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = t("gatewayPairPlaceholder");
+        elements.credentialProfileSelect.appendChild(placeholder);
+
+        credentialProfiles.forEach((profile, index) => {
+          const option = document.createElement("option");
+          option.value = profile.id;
+          option.textContent = `${index + 1}. ${shortBase(profile.baseUrl)} | ${maskKey(profile.apiKey)}`;
+          elements.credentialProfileSelect.appendChild(option);
+        });
+
+        const lastUsed = safeLocalStorageGet(CREDENTIAL_LAST_KEY, "");
+        if (previousValue && credentialProfiles.some((item) => item.id === previousValue)) {
+          elements.credentialProfileSelect.value = previousValue;
+        } else if (lastUsed && credentialProfiles.some((item) => item.id === lastUsed)) {
+          elements.credentialProfileSelect.value = lastUsed;
+        } else {
+          elements.credentialProfileSelect.value = "";
+        }
+      }
+
+      function upsertGatewayPair(baseUrl, apiKey, emitLog = false) {
+        const normalizedBase = String(baseUrl || "").trim();
+        const normalizedKey = String(apiKey || "").trim();
+        if (!normalizedBase || !normalizedKey) {
+          return false;
+        }
+
+        const id = gatewayPairId(normalizedBase, normalizedKey);
+        const foundIndex = credentialProfiles.findIndex((item) => item.id === id);
+        const next = {
+          id,
+          baseUrl: normalizedBase,
+          apiKey: normalizedKey,
+          updatedAt: Date.now(),
+        };
+        if (foundIndex >= 0) {
+          credentialProfiles.splice(foundIndex, 1);
+        }
+        credentialProfiles.unshift(next);
+        credentialProfiles = credentialProfiles.slice(0, 20);
+        saveGatewayPairs();
+        safeLocalStorageSet(CREDENTIAL_LAST_KEY, id);
+        renderGatewayPairs();
+        elements.credentialProfileSelect.value = id;
+        if (emitLog) {
+          appendSignalLogLine(`[GUI] ${t("pairSaved")}`);
+        }
+        markPairDraftSaved();
+        return true;
+      }
+
+      function applyGatewayPairById(id, autoDiscover = true) {
+        const match = credentialProfiles.find((item) => item.id === id);
+        if (!match) return;
+        elements.baseUrlInput.value = match.baseUrl;
+        elements.apiKeyInput.value = match.apiKey;
+        safeLocalStorageSet(CREDENTIAL_LAST_KEY, match.id);
+        markPairDraftSaved();
+        appendSignalLogLine(`[GUI] ${t("pairLoaded")}`);
+        if (autoDiscover) {
+          discoverModels(true);
+        }
+      }
+
+      function initGatewayPairs() {
+        credentialProfiles = loadGatewayPairs();
+        renderGatewayPairs();
+        const lastUsed = safeLocalStorageGet(CREDENTIAL_LAST_KEY, "");
+        if (lastUsed && credentialProfiles.some((item) => item.id === lastUsed)) {
+          applyGatewayPairById(lastUsed, true);
+          elements.credentialProfileSelect.value = lastUsed;
+        }
+      }
+
+      function deleteSelectedGatewayPair() {
+        const selectedId = String(elements.credentialProfileSelect.value || "").trim();
+        if (!selectedId) {
+          appendSignalLogLine(`[GUI] ${t("pairDeleteNone")}`);
+          return;
+        }
+        const nextProfiles = credentialProfiles.filter((item) => item.id !== selectedId);
+        if (nextProfiles.length === credentialProfiles.length) {
+          appendSignalLogLine(`[GUI] ${t("pairDeleteNone")}`);
+          return;
+        }
+        credentialProfiles = nextProfiles;
+        saveGatewayPairs();
+        const lastUsed = safeLocalStorageGet(CREDENTIAL_LAST_KEY, "");
+        if (lastUsed === selectedId) {
+          const fallbackId = credentialProfiles.length > 0 ? credentialProfiles[0].id : "";
+          safeLocalStorageSet(CREDENTIAL_LAST_KEY, fallbackId);
+        }
+        renderGatewayPairs();
+        appendSignalLogLine(`[GUI] ${t("pairDeleted")}`);
+      }
+
+      function updateModelList(models) {
+        discoveredModels = Array.isArray(models) ? models.slice() : [];
+        const currentModel = String(elements.modelInput.value || "").trim();
+        elements.modelSelect.innerHTML = "";
+        if (discoveredModels.length === 0) {
+          const emptyOption = document.createElement("option");
+          emptyOption.value = "__custom__";
+          emptyOption.textContent = t("customModel");
+          elements.modelSelect.appendChild(emptyOption);
+          elements.modelSelect.value = "__custom__";
+          elements.modelInput.classList.remove("hidden");
+          elements.modelInput.placeholder = t("customModelPlaceholder");
+          return;
+        }
+        discoveredModels.forEach((modelName) => {
+          const option = document.createElement("option");
+          option.textContent = modelName;
+          option.value = modelName;
+          elements.modelSelect.appendChild(option);
+        });
+        const customOption = document.createElement("option");
+        customOption.value = "__custom__";
+        customOption.textContent = t("customModel");
+        elements.modelSelect.appendChild(customOption);
+
+        if (currentModel && discoveredModels.includes(currentModel)) {
+          elements.modelSelect.value = currentModel;
+          elements.modelInput.classList.add("hidden");
+        } else if (currentModel) {
+          elements.modelSelect.value = "__custom__";
+          elements.modelInput.classList.remove("hidden");
+        } else {
+          elements.modelSelect.value = discoveredModels[0];
+          elements.modelInput.value = discoveredModels[0];
+          elements.modelInput.classList.add("hidden");
+        }
+        elements.modelInput.placeholder = t("customModelPlaceholder");
+      }
+
+      async function discoverModels(force = false) {
+        const apiBase = elements.baseUrlInput.value.trim();
+        const apiKey = elements.apiKeyInput.value.trim();
+        if (!apiBase || !apiKey) {
+          setModelHint("");
+          return;
+        }
+
+        const fingerprint = `${apiBase}::${apiKey}`;
+        if (!force && fingerprint === lastModelDiscoveryFingerprint) {
+          return;
+        }
+        lastModelDiscoveryFingerprint = fingerprint;
+
+        setModelHint(t("modelsDetecting"));
+        try {
+          const data = await requestJson("/api/models", "POST", {
+            api_base: apiBase,
+            api_key: apiKey,
+          });
+
+          if (data.ok && Array.isArray(data.models) && data.models.length > 0) {
+            updateModelList(data.models);
+            if (elements.modelSelect.value !== "__custom__") {
+              elements.modelInput.value = elements.modelSelect.value;
+            }
+            setModelHint(`${t("modelsDetected")} ${data.models.length}`);
+          } else if (data.error) {
+            setModelHint(`${t("modelsFailed")} ${data.error}`, true);
+          } else {
+            setModelHint(t("modelsNone"), true);
+          }
+        } catch (error) {
+          setModelHint(`${t("modelsFailed")} ${error.message}`, true);
+        }
+      }
+
+      function scheduleModelDiscovery() {
+        if (discoverModelsTimer) {
+          clearTimeout(discoverModelsTimer);
+        }
+        discoverModelsTimer = setTimeout(() => {
+          discoverModels(false);
+        }, 450);
+      }
+
+      async function requestJson(url, method = "GET", payload = null, timeoutMs = 0) {
+        const controller = new AbortController();
+        const timer =
+          timeoutMs > 0
+            ? setTimeout(() => {
+                controller.abort();
+              }, timeoutMs)
+            : null;
+        try {
+          const response = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: payload ? JSON.stringify(payload) : null,
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText}`);
+          }
+          return response.json();
+        } catch (error) {
+          if (error && error.name === "AbortError") {
+            throw new Error("request timeout");
+          }
+          throw error;
+        } finally {
+          if (timer) {
+            clearTimeout(timer);
+          }
+        }
+      }
+
+      function renderLogs(logs) {
+        elements.signalLogList.innerHTML = "";
+        const lines = (logs || []).slice(-30);
+        if (lines.length === 0) {
+          const li = document.createElement("li");
+          li.textContent = "[GUI] Ready.";
+          elements.signalLogList.appendChild(li);
+          return;
+        }
+        for (const line of lines) {
+          const li = document.createElement("li");
+          li.textContent = line;
+          elements.signalLogList.appendChild(li);
+        }
+      }
+
+      function renderState(state) {
+        lastStateSnapshot = state;
+        currentStatus = state.status || "idle";
+        elements.statusText.textContent = statusLine(state.status, state.status_text || "");
+        elements.currentStepValue.textContent = state.current_step || t("stepIdle");
+        if (state.source_path) {
+          setSourcePathField(state.source_path);
+        }
+        elements.checkpointPathValue.textContent = state.checkpoint_path || "-";
+        elements.runtimeValue.textContent = formatRuntime(state.runtime_seconds || 0);
+
+        const segDone = state.segment_done || 0;
+        const segTotal = state.segment_total || 0;
+        const segPercent = segTotal > 0 ? Math.min(100, (segDone / segTotal) * 100) : 0;
+        elements.globalProgressText.textContent = `${segDone} / ${segTotal} ${t("progressSegUnit")}`;
+        elements.globalProgressFill.style.width = `${segPercent}%`;
+
+        const chDone = state.chapter_done || 0;
+        const chTotal = state.chapter_total || 0;
+        const chPercent = chTotal > 0 ? Math.min(100, (chDone / chTotal) * 100) : 0;
+        elements.chapterProgressText.textContent = `${chDone} / ${chTotal} ${t("progressChUnit")}`;
+        elements.chapterProgressFill.style.width = `${chPercent}%`;
+
+        renderLogs(state.logs || []);
+
+        const healthy = !state.has_warning && state.status !== "error";
+        elements.healthBadge.textContent = healthy ? t("healthy") : t("warning");
+        elements.healthBadge.classList.toggle("bg-green-400", healthy);
+        elements.healthBadge.classList.toggle("bg-yellow-400", !healthy);
+      }
+
+      async function refreshState() {
+        try {
+          const state = await requestJson("/api/state");
+          renderState(state);
+        } catch (error) {
+          elements.statusText.textContent = `${t("statusError")} (${error.message})`;
+        }
+      }
+
+      async function startOrResume() {
+        try {
+          const payload = buildPayload();
+          if (shouldPersistPair(payload.api_base, payload.api_key)) {
+            upsertGatewayPair(payload.api_base, payload.api_key, false);
+          }
+          if (!payload.source_path) {
+            elements.statusText.textContent = t("statusNeedSource");
+            return;
+          }
+          if (currentStatus === "paused") {
+            await requestJson("/api/resume", "POST");
+          } else {
+            await requestJson("/api/start", "POST", payload);
+          }
+          await refreshState();
+        } catch (error) {
+          elements.statusText.textContent = `${t("statusError")} (${error.message})`;
+        }
+      }
+
+      async function pauseRun() {
+        try {
+          elements.statusText.textContent = t("statusPausing");
+          appendSignalLogLine(t("pauseClickLog"));
+          await requestJson("/api/pause", "POST");
+          await refreshState();
+        } catch (error) {
+          elements.statusText.textContent = `${t("statusError")} (${error.message})`;
+        }
+      }
+
+      async function saveAndExit() {
+        try {
+          elements.statusText.textContent = t("statusStopping");
+          appendSignalLogLine(t("exitClickLog"));
+          await requestJson("/api/exit", "POST");
+          await refreshState();
+        } catch (error) {
+          elements.statusText.textContent = `${t("statusError")} (${error.message})`;
+        }
+      }
+
+      async function pickSourceFile() {
+        elements.browseBtn.disabled = true;
+        elements.browseBtn.classList.add("opacity-70", "cursor-not-allowed");
+        elements.statusText.textContent = t("browseOpening");
+        appendSignalLogLine(`[GUI] ${t("browseOpening")}`);
+        try {
+          const data = await requestJson("/api/pick-file", "POST", {}, 25000);
+          if (data.path) {
+            setSourcePathField(data.path);
+            selectedMode = inferModeFromPath(data.path);
+            updateModeButtons();
+            elements.statusText.textContent = data.path;
+          } else if (data.error) {
+            elements.statusText.textContent = `${t("statusError")} (${data.error})`;
+          } else {
+            elements.statusText.textContent = t("statusNoFile");
+          }
+        } catch (error) {
+          if (String(error.message || "").toLowerCase().includes("timeout")) {
+            elements.statusText.textContent = t("browseTimeout");
+            appendSignalLogLine(`[WARN] ${t("browseTimeout")}`);
+          } else {
+            elements.statusText.textContent = `${t("statusError")} (${error.message})`;
+          }
+        } finally {
+          elements.browseBtn.disabled = false;
+          elements.browseBtn.classList.remove("opacity-70", "cursor-not-allowed");
+        }
+      }
+
+      elements.runBtn.addEventListener("click", startOrResume);
+      elements.pauseBtn.addEventListener("click", pauseRun);
+      elements.checkpointBtn.addEventListener("click", saveAndExit);
+      elements.browseBtn.addEventListener("click", pickSourceFile);
+      elements.baseUrlInput.addEventListener("input", () => {
+        baseEditedSincePairSave = true;
+      });
+      elements.apiKeyInput.addEventListener("input", () => {
+        keyEditedSincePairSave = true;
+        scheduleModelDiscovery();
+      });
+      elements.apiKeyInput.addEventListener("blur", () => {
+        const saved = shouldPersistPair(
+          elements.baseUrlInput.value,
+          elements.apiKeyInput.value
+        )
+          ? upsertGatewayPair(elements.baseUrlInput.value, elements.apiKeyInput.value, true)
+          : false;
+        if (saved) {
+          discoverModels(true);
+        }
+      });
+      elements.credentialProfileSelect.addEventListener("change", () => {
+        if (elements.credentialProfileSelect.value) {
+          applyGatewayPairById(elements.credentialProfileSelect.value, true);
+        }
+      });
+      elements.deleteCredentialProfileBtn.addEventListener("click", deleteSelectedGatewayPair);
+      elements.modelSelect.addEventListener("change", () => {
+        if (elements.modelSelect.value === "__custom__") {
+          elements.modelInput.classList.remove("hidden");
+          elements.modelInput.placeholder = t("customModelPlaceholder");
+          elements.modelInput.focus();
+        } else if (elements.modelSelect.value) {
+          elements.modelInput.classList.add("hidden");
+          elements.modelInput.value = elements.modelSelect.value;
+        }
+      });
+      elements.modelInput.addEventListener("input", () => {
+        if (elements.modelSelect.value !== "__custom__") {
+          elements.modelSelect.value = "__custom__";
+          elements.modelInput.classList.remove("hidden");
+        }
+      });
+      elements.sourceFileInput.addEventListener("change", () => {
+        selectedMode = inferModeFromPath(elements.sourceFileInput.value);
+        updateModeButtons();
+      });
+      elements.modeButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          selectedMode = btn.dataset.mode;
+          updateModeButtons();
+        });
+      });
+
+      elements.langEnBtn.addEventListener("click", () => applyLanguage("en"));
+      elements.langZhBtn.addEventListener("click", () => applyLanguage("zh"));
+      elements.styleMemphisBtn.addEventListener("click", () => applyTheme("memphis"));
+      elements.styleCorporateBtn.addEventListener("click", () => applyTheme("corporate"));
+
+      applyLanguage("en");
+      applyTheme("memphis");
+      selectedMode = inferModeFromPath(elements.sourceFileInput.value);
+      updateModeButtons();
+      initGatewayPairs();
+      updateModelList([]);
+      refreshState();
+      setInterval(refreshState, 1000);
+    </script>
+  </body>
+</html>

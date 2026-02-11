@@ -32,6 +32,7 @@ class MarkdownBookLoader(BaseBookLoader):
         context_paragraph_limit=0,
         temperature=1.0,
         source_lang="auto",
+        parallel_workers=1,
     ) -> None:
         self.md_name = md_name
         self.translate_model = model(
@@ -50,6 +51,7 @@ class MarkdownBookLoader(BaseBookLoader):
         self.batch_size = 10
         self.single_translate = single_translate
         self.md_paragraphs = []
+        self.parallel_workers = max(1, parallel_workers)
 
         try:
             with open(f"{md_name}", encoding="utf-8") as f:

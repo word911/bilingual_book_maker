@@ -25,6 +25,13 @@ TOKEN_ESTIMATOR_MODEL_MAP = {
     "qwen-mt-plus": "qwen-mt-plus",
 }
 
+_LOADER_CREATED_HOOK = None
+
+
+def set_loader_created_hook(hook):
+    global _LOADER_CREATED_HOOK
+    _LOADER_CREATED_HOOK = hook
+
 
 def parse_prompt_arg(prompt_arg):
     prompt = None
@@ -141,7 +148,7 @@ def resolve_token_estimator_model(
     return TOKEN_ESTIMATOR_MODEL_MAP.get(model_key, model_key)
 
 
-def main():
+def main(argv=None):
     translate_model_list = list(MODEL_DICT.keys())
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -500,7 +507,7 @@ So you are close to reaching the limit. You have to choose your own value, there
         help="disable interactive TUI controls (default is enabled)",
     )
 
-    options = parser.parse_args()
+    options = parser.parse_args(argv)
     if options.rpm < 0:
         parser.error("`--rpm` must be >= 0")
     if options.accumulated_min_num < 2:
@@ -669,6 +676,8 @@ So you are close to reaching the limit. You have to choose your own value, there
         source_lang=options.source_lang,
         parallel_workers=options.parallel_workers,
     )
+    if callable(_LOADER_CREATED_HOOK):
+        _LOADER_CREATED_HOOK(e)
     if hasattr(e, "setup_runtime_control"):
         e.setup_runtime_control(tui_enabled=not options.no_tui)
     if hasattr(e.translate_model, "set_gateway_cooldown"):
