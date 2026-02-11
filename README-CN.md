@@ -23,6 +23,27 @@ pip install -U bbook_maker
 bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 ```
 
+## Web GUI
+
+启动本地 GUI：
+
+```shell
+bbook_gui
+```
+
+或指定 host/port：
+
+```shell
+bbook_gui --host 127.0.0.1 --port 8765 --no-browser
+```
+
+GUI 使用建议（重要）：
+
+- 建议安装/启用 `tkinter`（有些人会误写成 `tinker`），这样“浏览”文件对话框更稳定。
+- 如果没有 `tkinter`，GUI 仍可使用，但“浏览”按钮在部分环境下可能超时或失败。
+- 常见告警：`powershell dialog failed ... timed out | tkinter dialog failed: No module named 'tkinter'`。
+- 此时可直接把文件路径粘贴到“源文件”输入框，或改用带 `tkinter` 的 Python 解释器运行（例如本项目可用 `py -3.13`）。
+
 ## 翻译服务
 
 - 使用 `--openai_key` 指定 OpenAI API key，如果有多个可以用英文逗号分隔(xxx,xxx,xxx)，可以减少接口调用次数限制带来的错误。

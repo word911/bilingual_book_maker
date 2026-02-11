@@ -32,6 +32,36 @@ pip install -U bbook_maker
 bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 ```
 
+## Web GUI
+
+Run the new local GUI:
+
+```shell
+bbook_gui
+```
+
+Or with host/port overrides:
+
+```shell
+bbook_gui --host 127.0.0.1 --port 8765 --no-browser
+```
+
+GUI features in this version:
+
+- Supports EPUB / TXT / PDF / SRT input tasks
+- Bilingual UI (English / Chinese) with style toggle (Memphis / Corporate Clean)
+- Start / Pause / Save+Exit controls wired to runtime control
+- Shows checkpoint path, runtime, progress counters, and rolling signal logs
+- Lets you set source path, model, target language, `api_base`, and `api_key`
+
+GUI runtime recommendation:
+
+- Install/enable `tkinter` (sometimes misspelled as "tinker") for stable file picker behavior.
+- If `tkinter` is missing, the GUI still works, but `Browse` may timeout/fail on some environments.
+- Typical symptoms without `tkinter`: signal board shows warnings like
+  `powershell dialog failed ... timed out | tkinter dialog failed: No module named 'tkinter'`.
+- In that case, paste the source file path manually into `Source File`, or run with a Python interpreter that has `tkinter` enabled (for example `py -3.13` on this project setup).
+
 ## Translate Service
 
 - Use `--openai_key` option to specify OpenAI API key. If you have multiple keys, separate them by commas (xxx,xxx,xxx) to reduce errors caused by API call limits.
