@@ -2,6 +2,7 @@ import re
 import time
 import os
 import shutil
+from datetime import datetime
 from copy import copy
 from os import environ
 from itertools import cycle
@@ -10,6 +11,7 @@ from threading import Lock
 
 from openai import AzureOpenAI, OpenAI, RateLimitError
 from rich import print
+from tqdm import tqdm
 
 from .base_translator import Base
 from ..config import config
@@ -86,7 +88,14 @@ class ChatGPTAPI(Base):
     ) -> None:
         super().__init__(key, language)
         self.key_len = len(key.split(","))
-        self.openai_client = OpenAI(api_key=next(self.keys), base_url=api_base)
+        self.request_timeout = float(kwargs.get("request_timeout", 90.0))
+        if self.request_timeout <= 0:
+            self.request_timeout = 90.0
+        self.openai_client = OpenAI(
+            api_key=next(self.keys),
+            base_url=api_base,
+            timeout=self.request_timeout,
+        )
         self.api_base = api_base
 
         self.prompt_template = (
@@ -130,6 +139,7 @@ class ChatGPTAPI(Base):
             0.0, float(kwargs.get("gateway_cooldown_seconds", 120.0))
         )
         self._gateway_timeout_events = 0
+        self._provider_error_log_path = os.path.join("log", "provider_error.log")
 
     def rotate_key(self):
         with self._api_lock:
@@ -198,6 +208,106 @@ class ChatGPTAPI(Base):
         ]
         return any(p in msg for p in gateway_patterns)
 
+    @staticmethod
+    def _ui_log(message):
+        try:
+            tqdm.write(message)
+        except Exception:
+            print(message)
+
+    @staticmethod
+    def _compact_error_text(err, max_length=120):
+        text = re.sub(r"\s+", " ", str(err)).strip()
+        lower = text.lower()
+        if "<!doctype html" in lower or "<html" in lower:
+            return "provider returned an HTML error page (likely gateway/proxy failure)"
+        if len(text) <= max_length:
+            return text
+        return text[: max_length - 3] + "..."
+
+    @staticmethod
+    def _extract_request_id(err):
+        response = getattr(err, "response", None)
+        headers = getattr(response, "headers", None) if response is not None else None
+        if headers is not None and hasattr(headers, "get"):
+            for key in (
+                "x-request-id",
+                "x-openai-request-id",
+                "request-id",
+                "openai-request-id",
+            ):
+                request_id = headers.get(key)
+                if request_id:
+                    return str(request_id)
+
+        text = str(err)
+        patterns = [
+            r"(?:request[_\s-]?id|x-request-id)\s*[:=]\s*([A-Za-z0-9._-]+)",
+            r"\b(req_[A-Za-z0-9]+)\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    @staticmethod
+    def _extract_status_code(err):
+        status_code = getattr(err, "status_code", None)
+        if status_code is None:
+            response = getattr(err, "response", None)
+            status_code = getattr(response, "status_code", None)
+        if status_code is not None:
+            try:
+                return int(status_code)
+            except Exception:
+                pass
+
+        match = re.search(r"\b([45][0-9]{2})\b", str(err))
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _status_text(status_code):
+        if status_code is None:
+            return "unknown"
+        mapping = {
+            429: "Too Many Requests",
+            500: "Internal Server Error",
+            502: "Bad Gateway",
+            503: "Service Unavailable",
+            504: "Gateway Timeout",
+        }
+        return mapping.get(status_code, "HTTP Error")
+
+    def _log_provider_error(self, err):
+        os.makedirs("log", exist_ok=True)
+        request_id = self._extract_request_id(err) or "-"
+        status_code = self._extract_status_code(err)
+        with open(self._provider_error_log_path, "a", encoding="utf-8") as f:
+            print(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"{type(err).__name__} status={status_code} request_id={request_id}",
+                file=f,
+            )
+            print(str(err), file=f)
+            print("-" * 60, file=f)
+
+    def _format_retry_error(self, err, retry_seconds):
+        status_code = self._extract_status_code(err)
+        request_id = self._extract_request_id(err)
+        status_label = self._status_text(status_code)
+        status_part = f"status={status_code}" if status_code is not None else "status=unknown"
+        request_id_part = f", request_id={request_id}" if request_id else ""
+        return (
+            f"[WARN] {type(err).__name__} ({status_part} {status_label}){request_id_part}. "
+            f"Retry in {retry_seconds}s. Full detail: {self._provider_error_log_path}"
+        )
+
     def _maybe_apply_gateway_timeout_cooldown(self, err):
         if not self._is_gateway_timeout_error(err):
             self._gateway_timeout_streak = 0
@@ -209,7 +319,7 @@ class ChatGPTAPI(Base):
             return
 
         cooldown_seconds = self._gateway_cooldown_seconds
-        print(
+        self._ui_log(
             "Detected consecutive 504 gateway timeout errors "
             f"({self._gateway_timeout_streak}), cooling down for "
             f"{cooldown_seconds} seconds",
@@ -251,7 +361,7 @@ class ChatGPTAPI(Base):
                 self.context_list.pop(0)
                 self.context_translated_list.pop(0)
 
-    def translate(self, text, needprint=True):
+    def translate(self, text, needprint=False):
         start_time = time.time()
         # todo: Determine whether to print according to the cli option
         if needprint:
@@ -273,26 +383,26 @@ class ChatGPTAPI(Base):
                 # 3. all apikey reach limit, then use current sleep
                 self._gateway_timeout_streak = 0
                 sleep_time = int(60 / self.key_len)
-                print(e, f"will sleep {sleep_time} seconds")
+                self._log_provider_error(e)
+                self._ui_log(self._format_retry_error(e, sleep_time))
                 time.sleep(sleep_time)
                 attempt_count += 1
                 if attempt_count == max_attempts:
-                    print(f"Get {attempt_count} consecutive exceptions")
+                    self._ui_log(f"Get {attempt_count} consecutive exceptions")
                     raise
             except Exception as e:
                 # Transient network/provider errors should retry instead of returning None.
                 self._maybe_apply_gateway_timeout_cooldown(e)
                 sleep_time = min(2**attempt_count, 30)
-                print(
-                    f"{type(e).__name__}: {e}, will retry in {sleep_time} seconds",
-                )
+                self._log_provider_error(e)
+                self._ui_log(self._format_retry_error(e, sleep_time))
                 time.sleep(sleep_time)
                 attempt_count += 1
                 if attempt_count == max_attempts:
-                    print(f"Get {attempt_count} consecutive exceptions")
+                    self._ui_log(f"Get {attempt_count} consecutive exceptions")
                     raise RuntimeError(
                         "Translation failed after retries; last error: "
-                        f"{type(e).__name__}: {e}",
+                        f"{type(e).__name__}: {self._compact_error_text(e, 320)}",
                     ) from e
 
         # todo: Determine whether to print according to the cli option
@@ -394,7 +504,7 @@ class ChatGPTAPI(Base):
         try:
             return self.translate(para_text, False) or ""
         except Exception as item_err:
-            print(
+            self._ui_log(
                 "Fallback paragraph translation failed: "
                 f"{type(item_err).__name__}: {item_err}",
             )
@@ -420,8 +530,6 @@ class ChatGPTAPI(Base):
             para_text = self._extract_paragraph_text(p)
             # Using special delimiters and clear numbering
             formatted_text += f"PARAGRAPH {i}:\n{para_text}\n\n"
-
-        print(f"plist len = {plist_len}")
 
         original_prompt_template = self.prompt_template
 
@@ -463,7 +571,6 @@ class ChatGPTAPI(Base):
                 translated_paragraph = matches[0].strip()
                 translated_paragraphs.append(translated_paragraph)
             else:
-                print(f"Warning: Could not find translation for paragraph {i}")
                 loose_pattern = (
                     r"(?:TRANSLATION|PARAGRAPH|PARA).*?"
                     + str(i)
@@ -477,7 +584,7 @@ class ChatGPTAPI(Base):
 
         # If the number of extracted paragraphs is incorrect, try the alternative extraction method.
         if len(translated_paragraphs) != plist_len:
-            print(
+            self._ui_log(
                 f"Warning: Extracted {len(translated_paragraphs)}/{plist_len} paragraphs. Using fallback extraction."
             )
 
@@ -513,6 +620,20 @@ class ChatGPTAPI(Base):
         elif len(translated_paragraphs) > plist_len:
             translated_paragraphs = translated_paragraphs[:plist_len]
 
+        missing_indexes = []
+        for idx, paragraph in enumerate(plist):
+            origin_text = self._extract_paragraph_text(paragraph)
+            if origin_text and not (translated_paragraphs[idx] or "").strip():
+                missing_indexes.append(idx)
+
+        if missing_indexes:
+            self._ui_log(
+                f"[WARN] Batch parse mismatch: missing {len(missing_indexes)}/{plist_len} "
+                "paragraphs, retrying those paragraphs individually."
+            )
+            for idx in missing_indexes:
+                translated_paragraphs[idx] = self._translate_single_paragraph(plist[idx])
+
         if self._looks_like_failed_batch_result(plist, translated_paragraphs):
             raise RuntimeError(
                 "Batch translation output could not be parsed into non-empty paragraphs",
@@ -528,19 +649,18 @@ class ChatGPTAPI(Base):
             return self._translate_list_once(plist)
         except Exception as e:
             if plist_len == 1:
-                print(
-                    "Batch paragraph translation failed for single paragraph, "
-                    "fallback to direct translation: "
-                    f"{type(e).__name__}: {e}",
+                self._ui_log(
+                    "[WARN] Batch translation failed for a single paragraph; "
+                    "fallback to direct translation."
                 )
                 return [self._translate_single_paragraph(plist[0])]
 
             split_index = max(1, plist_len // 2)
             left = plist[:split_index]
             right = plist[split_index:]
-            print(
-                "Batch paragraph translation failed, retrying with smaller batches: "
-                f"{len(left)} + {len(right)} ({type(e).__name__}: {e})",
+            self._ui_log(
+                "[WARN] Batch translation failed, retrying with smaller batches: "
+                f"{len(left)} + {len(right)}.",
             )
             return self._translate_list_adaptive(left) + self._translate_list_adaptive(
                 right
@@ -582,6 +702,7 @@ class ChatGPTAPI(Base):
             azure_endpoint=self.api_base,
             api_version="2023-07-01-preview",
             azure_deployment=self.deployment_id,
+            timeout=self.request_timeout,
         )
 
     def set_gpt35_models(self, ollama_model=""):

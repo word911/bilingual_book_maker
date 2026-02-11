@@ -90,3 +90,54 @@ def test_translate_list_auto_split_batches(monkeypatch):
     assert results == ["T:first", "T:second", "T:third", "T:fourth"]
     assert split_calls[0] == 4
     assert 2 in split_calls
+
+
+def test_retry_error_message_is_concise_and_contains_request_id(tmp_path):
+    translator = ChatGPTAPI("test-key", "zh-hans")
+    translator._provider_error_log_path = str(tmp_path / "provider_error.log")
+
+    class FakeError(Exception):
+        def __init__(self):
+            self.response = type(
+                "Resp",
+                (),
+                {"headers": {"x-request-id": "req_test_123"}, "status_code": 503},
+            )()
+            self.status_code = 503
+
+        def __str__(self):
+            return "Gateway timeout " + ("detail " * 80)
+
+    err = FakeError()
+    translator._log_provider_error(err)
+    message = translator._format_retry_error(err, retry_seconds=5)
+
+    assert "request_id=req_test_123" in message
+    assert "status=503" in message
+    assert "Service Unavailable" in message
+    assert "Retry in 5s." in message
+    assert "provider_error.log" in message
+    assert "req_test_123" in (
+        (tmp_path / "provider_error.log").read_text(encoding="utf-8")
+    )
+
+
+def test_translate_list_retries_missing_paragraphs_individually(monkeypatch, capsys):
+    translator = ChatGPTAPI("test-key", "zh-hans")
+
+    def fake_translate(text, needprint=False):
+        if "PARAGRAPH 1:" in text and "PARAGRAPH 2:" in text:
+            return "TRANSLATION OF PARAGRAPH 1:\nT:first\n\n"
+        return f"T:{text}"
+
+    monkeypatch.setattr(translator, "translate", fake_translate)
+
+    soup = bs("<p>first</p><p>second</p>", "html.parser")
+    plist = soup.find_all("p")
+
+    results = translator.translate_list(plist)
+
+    captured = capsys.readouterr()
+    assert "[WARN] Batch parse mismatch: missing 1/2 paragraphs" in captured.out
+    assert "Could not find translation for paragraph" not in captured.out
+    assert results == ["T:first", "T:second"]

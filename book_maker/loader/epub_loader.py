@@ -177,8 +177,8 @@ class EPUBBookLoader(BaseBookLoader):
             reduced = max(min_num, int(previous * self.accumulated_backoff_factor))
             if reduced < previous:
                 self._dynamic_accumulated_num = reduced
-                print(
-                    "Gateway timeout observed, lower accumulated_num "
+                self._ui_log(
+                    "[ADAPTIVE] Gateway timeout detected, lower accumulated_num "
                     f"from {previous} to {reduced}"
                 )
             return
@@ -195,8 +195,8 @@ class EPUBBookLoader(BaseBookLoader):
             )
             if increased > previous:
                 self._dynamic_accumulated_num = increased
-                print(
-                    "Batch traffic stabilized, raise accumulated_num "
+                self._ui_log(
+                    "[ADAPTIVE] Batch traffic stabilized, raise accumulated_num "
                     f"from {previous} to {increased}"
                 )
             self._accumulated_success_streak = 0
@@ -209,6 +209,75 @@ class EPUBBookLoader(BaseBookLoader):
             or is_text_link(text)
             or all(char in string.punctuation for char in text)
         )
+
+    @staticmethod
+    def _feature_state(enabled):
+        return "ON" if enabled else "OFF"
+
+    @staticmethod
+    def _ui_log(message):
+        try:
+            tqdm.write(message)
+        except Exception:
+            print(message)
+
+    @staticmethod
+    def _safe_progress_update(pbar, step=1):
+        if pbar is None or step <= 0:
+            return
+        if pbar.total is None:
+            pbar.update(step)
+            return
+        remaining = max(0, pbar.total - pbar.n)
+        if remaining <= 0:
+            return
+        pbar.update(min(step, remaining))
+
+    def _print_runtime_summary(self, chapter_total, segment_total, worker_count):
+        if self.batch_flag:
+            batch_mode = "submit"
+        elif self.batch_use_flag:
+            batch_mode = "consume"
+        else:
+            batch_mode = "off"
+
+        processing_mode = (
+            "parallel"
+            if self.enable_parallel and chapter_total > 1
+            else "sequential"
+        )
+
+        self._ui_log("------------------------------------------------------")
+        self._ui_log("[RUN] Starting EPUB translation")
+        self._ui_log(f"[RUN] Source: {self.epub_name}")
+        self._ui_log(f"[RUN] Chapters: {chapter_total}; Target segments: {segment_total}")
+        self._ui_log(
+            f"[RUN] Resume: {self._feature_state(self.resume)} "
+            f"(cached translations: {len(self.p_to_save)})"
+        )
+        self._ui_log(f"[RUN] Processing: {processing_mode} (workers: {worker_count})")
+        self._ui_log(f"[RUN] Context: {self._feature_state(self.context_flag)}")
+        self._ui_log(f"[RUN] Batch mode: {batch_mode}")
+        self._ui_log(
+            f"[RUN] Accumulated translation: "
+            f"{self._feature_state(self.accumulated_num > 1)} "
+            f"(target: {self.accumulated_num})"
+        )
+        if self.accumulated_num > 1:
+            self._ui_log(
+                "[RUN] Adaptive backoff: ON "
+                f"(min={self.accumulated_min_num}, "
+                f"backoff={self.accumulated_backoff_factor}, "
+                f"recover={self.accumulated_recover_factor}, "
+                f"stable_batches={self.accumulated_recover_successes})"
+            )
+        else:
+            self._ui_log("[RUN] Adaptive backoff: OFF")
+        self._ui_log(
+            f"[RUN] Test mode: {self._feature_state(self.is_test)} "
+            f"(limit: {self.test_num if self.is_test else 'N/A'})"
+        )
+        self._ui_log("------------------------------------------------------")
 
     def _make_new_book(self, book):
         new_book = epub.EpubBook()
@@ -391,7 +460,7 @@ class EPUBBookLoader(BaseBookLoader):
         )
         return self._save_resume_text(index, translated_text)
 
-    def translate_paragraphs_acc(self, p_list, send_num, index, p_to_save_len):
+    def translate_paragraphs_acc(self, p_list, send_num, index, p_to_save_len, pbar=None):
         count = 0
         wait_p_list = []
         current_send_num = max(2, int(send_num))
@@ -429,7 +498,7 @@ class EPUBBookLoader(BaseBookLoader):
                 split_index = max(1, len(pending) // 2)
                 left = pending[:split_index]
                 right = pending[split_index:]
-                print(
+                self._ui_log(
                     "Gateway timeout in batch, retrying with smaller groups: "
                     f"{len(left)} + {len(right)}"
                 )
@@ -457,6 +526,7 @@ class EPUBBookLoader(BaseBookLoader):
                 paragraph = pending.pop(0)
                 saved_text = self.p_to_save[index]
                 index = self._apply_translation(paragraph, saved_text, index)
+                self._safe_progress_update(pbar, 1)
 
             if not pending:
                 return
@@ -469,11 +539,11 @@ class EPUBBookLoader(BaseBookLoader):
                     else ""
                 )
                 index = self._apply_translation(paragraph, translated_text, index)
+                self._safe_progress_update(pbar, 1)
 
-        for i, p in enumerate(p_list):
+        for p in p_list:
             if self.is_test and index >= self.test_num:
                 break
-            print(f"translating {i}/{len(p_list)}")
             temp_p = copy(p)
 
             for p_exclude in self.exclude_translate_tags.split(","):
@@ -486,6 +556,7 @@ class EPUBBookLoader(BaseBookLoader):
             if any(
                 [not p.text, self._is_special_text(temp_p.text), not_trans(temp_p.text)]
             ):
+                self._safe_progress_update(pbar, 1)
                 continue
 
             length = self._estimate_tokens(temp_p.text)
@@ -503,6 +574,7 @@ class EPUBBookLoader(BaseBookLoader):
                         2, int(self._dynamic_accumulated_num or current_send_num)
                     )
                 index = self._apply_translation(p, translated_text, index)
+                self._safe_progress_update(pbar, 1)
                 continue
 
             # If adding this paragraph exceeds the threshold, flush first.
@@ -649,6 +721,8 @@ class EPUBBookLoader(BaseBookLoader):
         trans_taglist,
         fixstart=None,
         fixend=None,
+        chapter_index=None,
+        chapter_total=None,
     ):
         if self.only_filelist != "" and item.file_name not in self.only_filelist.split(
             ","
@@ -689,13 +763,27 @@ class EPUBBookLoader(BaseBookLoader):
             p_list.extend(soup.findAll(text=True))
 
         send_num = self.accumulated_num
+        chapter_label = (
+            f"{chapter_index}/{chapter_total}"
+            if chapter_index is not None and chapter_total is not None
+            else "retranslate"
+        )
+        translate_mode = "accumulated" if send_num > 1 else "single"
+        self._ui_log(
+            f"[CHAPTER {chapter_label}] {item.file_name} | "
+            f"segments={len(p_list)} | mode={translate_mode}"
+        )
         if send_num > 1:
             with open("log/buglog.txt", "a") as f:
                 print(f"------------- {item.file_name} -------------", file=f)
 
-            print("------------------------------------------------------")
-            print(f"dealing {item.file_name} ...")
-            index = self.translate_paragraphs_acc(p_list, send_num, index, p_to_save_len)
+            index = self.translate_paragraphs_acc(
+                p_list,
+                send_num,
+                index,
+                p_to_save_len,
+                pbar=pbar,
+            )
         else:
             is_test_done = self.is_test and index > self.test_num
             p_block = []
@@ -704,7 +792,7 @@ class EPUBBookLoader(BaseBookLoader):
                 if is_test_done:
                     break
                 if not p.text or self._is_special_text(p.text):
-                    pbar.update(1)
+                    self._safe_progress_update(pbar, 1)
                     continue
 
                 new_p = self._extract_paragraph(copy(p))
@@ -717,17 +805,15 @@ class EPUBBookLoader(BaseBookLoader):
                         )
                         p_block = [p]
                         block_len = p_len
-                        print()
                     else:
                         p_block.append(p)
                 else:
                     index = self._process_paragraph(
                         p, new_p, index, p_to_save_len, thread_safe=False
                     )
-                    print()
 
                 # pbar.update(delta) not pbar.update(index)?
-                pbar.update(1)
+                self._safe_progress_update(pbar, 1)
 
                 if self.is_test and index >= self.test_num:
                     break
@@ -753,7 +839,7 @@ class EPUBBookLoader(BaseBookLoader):
         self.enable_parallel = workers > 1
 
         if workers > 8:
-            print(
+            self._ui_log(
                 f"⚠️  Warning: {workers} workers is quite high. Consider using 2-8 workers for optimal performance."
             )
 
@@ -845,7 +931,7 @@ class EPUBBookLoader(BaseBookLoader):
 
         except Exception as e:
             chapter_result["error"] = str(e)
-            print(f"Error processing chapter {item.file_name}: {e}")
+            self._ui_log(f"[WARN] Chapter worker error: {item.file_name}: {e}")
 
         return chapter_result
 
@@ -1017,7 +1103,7 @@ class EPUBBookLoader(BaseBookLoader):
             if self.batch_use_flag:
                 start_time = time.time()
                 while not self.translate_model.is_completed_batch():
-                    print("Batch translation is not completed yet")
+                    self._ui_log("Batch translation is not completed yet")
                     time.sleep(2)
                     if time.time() - start_time > 300:  # 5 minutes
                         raise Exception("Batch translation timed out after 5 minutes")
@@ -1063,10 +1149,25 @@ class EPUBBookLoader(BaseBookLoader):
             )
             for i in all_items
         )
-        pbar = tqdm(total=self.test_num) if self.is_test else tqdm(total=all_p_length)
-        print()
+        document_items = list(self.origin_book.get_items_of_type(ITEM_DOCUMENT))
+        effective_workers = 1
+        use_parallel = self.enable_parallel and len(document_items) > 1
+        if use_parallel:
+            effective_workers = min(self.parallel_workers, len(document_items))
+
+        pbar_total = self.test_num if self.is_test else all_p_length
+        pbar = None
+        if self.retranslate or not use_parallel:
+            pbar = tqdm(
+                total=pbar_total,
+                desc="Segments",
+                unit="seg",
+                dynamic_ncols=True,
+                mininterval=0.5,
+            )
         index = 0
         p_to_save_len = len(self.p_to_save)
+        start_time = time.time()
         try:
             if self.retranslate:
                 self.retranslate_book(
@@ -1078,37 +1179,48 @@ class EPUBBookLoader(BaseBookLoader):
                 if item.get_type() != ITEM_DOCUMENT:
                     new_book.add_item(item)
 
-            document_items = list(self.origin_book.get_items_of_type(ITEM_DOCUMENT))
+            self._print_runtime_summary(
+                chapter_total=len(document_items),
+                segment_total=pbar_total,
+                worker_count=effective_workers,
+            )
 
-            if self.enable_parallel and len(document_items) > 1:
-                # Optimize worker count: no point having more workers than chapters
-                effective_workers = min(self.parallel_workers, len(document_items))
-
-                # Parallel processing with proper accumulated_num handling
-                print(f"🚀 Parallel processing: {len(document_items)} chapters")
+            if use_parallel:
+                self._ui_log(
+                    f"[RUN] Parallel chapter processing enabled "
+                    f"for {len(document_items)} chapters"
+                )
                 if effective_workers < self.parallel_workers:
-                    print(
-                        f"📊 Optimized workers: {effective_workers} (reduced from {self.parallel_workers})"
+                    self._ui_log(
+                        f"[RUN] Optimized workers: {effective_workers} "
+                        f"(from {self.parallel_workers})"
                     )
                 else:
-                    print(f"📊 Using {effective_workers} workers")
+                    self._ui_log(f"[RUN] Using workers: {effective_workers}")
 
                 if self.accumulated_num > 1:
-                    print(
-                        f"📝 Each chapter applies accumulated_num={self.accumulated_num} independently"
+                    self._ui_log(
+                        f"[RUN] Chapter-level accumulated translation is enabled "
+                        f"(target={self.accumulated_num})"
                     )
 
                 if self.context_flag:
-                    print(
-                        f"🔗 Context enabled: each chapter maintains independent context (limit={self.translate_model.context_paragraph_limit})"
+                    context_limit = getattr(
+                        self.translate_model, "context_paragraph_limit", "N/A"
+                    )
+                    self._ui_log(
+                        "[RUN] Context mode: ON "
+                        f"(chapter-local, limit={context_limit})"
                     )
                 else:
-                    print(f"🚫 Context disabled for this translation")
+                    self._ui_log("[RUN] Context mode: OFF")
 
-                # Create a simpler progress bar for parallel processing
-                pbar.close()  # Close the original progress bar
                 chapter_pbar = tqdm(
-                    total=len(document_items), desc="Chapters", unit="ch"
+                    total=len(document_items),
+                    desc="Chapters",
+                    unit="ch",
+                    dynamic_ncols=True,
+                    mininterval=0.5,
                 )
 
                 chapter_data_list = [
@@ -1132,51 +1244,73 @@ class EPUBBookLoader(BaseBookLoader):
                             new_book.add_item(item)
                             chapter_pbar.update(1)
                             chapter_pbar.set_postfix_str(
-                                f"Latest: {item.file_name[:20]}..."
+                                f"latest={item.file_name[:20]}"
                             )
 
                         except Exception as e:
-                            print(f"❌ Error processing {item.file_name}: {e}")
+                            self._ui_log(
+                                f"[WARN] Chapter failed: {item.file_name} "
+                                f"({type(e).__name__}: {e})"
+                            )
                             new_book.add_item(item)
                             chapter_pbar.update(1)
 
                 chapter_pbar.close()
-                print(f"✅ Completed all {len(document_items)} chapters")
+                self._ui_log(
+                    f"[RUN] Chapter processing completed: "
+                    f"{len(document_items)}/{len(document_items)}"
+                )
             else:
                 # Sequential processing (original behavior or single chapter)
                 if len(document_items) == 1 and self.enable_parallel:
-                    print(f"📄 Single chapter detected - using sequential processing")
+                    self._ui_log("[RUN] Single chapter detected, using sequential mode")
 
-                for item in document_items:
+                for chapter_index, item in enumerate(document_items, start=1):
                     index = self.process_item(
-                        item, index, p_to_save_len, pbar, new_book, trans_taglist
+                        item,
+                        index,
+                        p_to_save_len,
+                        pbar,
+                        new_book,
+                        trans_taglist,
+                        chapter_index=chapter_index,
+                        chapter_total=len(document_items),
                     )
-
-                if self.accumulated_num > 1:
-                    name, _ = os.path.splitext(self.epub_name)
-                    epub.write_epub(f"{name}_bilingual.epub", new_book, {})
             name, _ = os.path.splitext(self.epub_name)
+            output_path = f"{name}_bilingual.epub"
+            if pbar is not None:
+                pbar.close()
             if self.batch_flag:
                 self.translate_model.batch()
+                self._ui_log("[DONE] Batch translation request submitted.")
             else:
-                epub.write_epub(f"{name}_bilingual.epub", new_book, {})
-            if self.accumulated_num == 1:
-                pbar.close()
+                epub.write_epub(output_path, new_book, {})
+                elapsed_seconds = time.time() - start_time
+                self._ui_log("------------------------------------------------------")
+                self._ui_log(
+                    "[DONE] Translation completed. "
+                    f"Output file: {output_path}. "
+                    f"Translated paragraphs: {len(self.p_to_save)}. "
+                    f"Elapsed: {elapsed_seconds:.1f}s."
+                )
         except KeyboardInterrupt as e:
-            print(e)
-            print("you can resume it next time")
+            self._ui_log(str(e))
+            self._ui_log("you can resume it next time")
             self._save_progress()
             self._save_temp_book()
             sys.exit(0)
         except Exception:
             traceback.print_exc()
-            print("save progress for resume ...")
+            self._ui_log("save progress for resume ...")
             try:
                 self._save_progress()
                 self._save_temp_book()
             except Exception as save_error:
-                print(f"save progress failed: {save_error}")
+                self._ui_log(f"save progress failed: {save_error}")
             sys.exit(1)
+        finally:
+            if pbar is not None:
+                pbar.close()
 
     def load_state(self):
         try:

@@ -107,3 +107,30 @@ def test_epub_resume_continues_from_checkpoint(tmp_path):
     output_path = tmp_path / "resume_test_bilingual.epub"
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_epub_prints_completion_summary(tmp_path, capsys):
+    epub_path = tmp_path / "resume_test.epub"
+    _create_epub_with_paragraphs(epub_path)
+
+    ResumeFlakyModel.reset(fail_enabled=False)
+    loader = EPUBBookLoader(
+        str(epub_path),
+        ResumeFlakyModel,
+        key="test-key",
+        resume=False,
+        language="zh-hans",
+    )
+    loader.accumulated_num = 2
+    loader.make_bilingual_book()
+
+    captured = capsys.readouterr()
+    assert "[RUN] Starting EPUB translation" in captured.out
+    assert "[RUN] Resume: OFF" in captured.out
+    assert "[RUN] Accumulated translation: ON" in captured.out
+    assert "[RUN] Adaptive backoff: ON" in captured.out
+    assert "[DONE] Translation completed." in captured.out
+    assert "Output file:" in captured.out
+    assert "resume_test_bilingual.epub" in captured.out
+    assert "translating " not in captured.out
+    assert "plist len =" not in captured.out

@@ -131,6 +131,19 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - Once the translation is complete, a bilingual book named `${book_name}_bilingual.epub` would be generated for EPUB inputs; for TXT/MD/SRT inputs a bilingual text (or subtitle) file named `${book_name}_bilingual.txt` (or `_bilingual.srt`) will be generated. For **PDF inputs** the tool will produce a bilingual `.txt` fallback and will also attempt to create `${book_name}_bilingual.epub` — if EPUB creation fails, the TXT fallback remains so you do not need to retranslate.
 - If there are any errors or you wish to interrupt the translation by pressing `CTRL+C`, a temporary bilingual file (for example `{book_name}_bilingual_temp.epub` or `{book_name}_bilingual_temp.txt`) would be generated. You can simply rename it to any desired name.
 
+### Runtime Output (EPUB)
+
+- `Found checkpoint file ... Auto resume enabled.` means resume mode was auto-enabled by a local checkpoint file.
+- `[RUN] ...` prints one startup summary with key switches (resume, parallel, accumulated batching, adaptive backoff, context, test mode).
+- `[CHAPTER i/n] ...` prints one line per chapter (no paragraph-level spam).
+- Progress bars:
+  - Sequential mode: `Segments` progress bar.
+  - Parallel mode: `Chapters` progress bar only.
+- `[ADAPTIVE] ...` appears when accumulated batching budget is reduced or recovered automatically.
+- `[WARN] ...` now shows compact retry info with HTTP status (for example `429/503`) and optional `request_id`.
+  - Full provider error payload is written to `log/provider_error.log`.
+- `[DONE] ...` prints final output path, translated paragraph count, and elapsed time.
+
 ## Params
 
 - `--test`:

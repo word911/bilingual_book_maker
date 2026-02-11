@@ -116,6 +116,19 @@ bbook --book_name test_books/animal_farm.epub --openai_key ${openai_key} --test
 - 翻译完会生成一本 `{book_name}_bilingual.epub` 的双语书
 - 如果出现了错误或使用 `CTRL+C` 中断命令，不想接下来继续翻译了，会生成一本 `{book_name}_bilingual_temp.epub` 的书，直接改成你想要的名字就可以了
 
+### 运行输出说明（EPUB）
+
+- 出现 `Found checkpoint file ... Auto resume enabled.` 表示检测到本地断点文件并自动开启续翻。
+- `[RUN] ...`：启动阶段一次性打印关键开关状态（续翻、并行、累计翻译、自适应降档、上下文、测试模式等）。
+- `[CHAPTER i/n] ...`：每章一行摘要，不再逐段刷屏。
+- 进度条：
+  - 串行模式显示 `Segments`。
+  - 并行模式只显示 `Chapters`。
+- `[ADAPTIVE] ...`：累计翻译预算自动降档或回升时打印。
+- `[WARN] ...`：重试告警只展示精简信息（状态码如 `429/503`、可选 `request_id`）。
+  - 完整返回内容写入 `log/provider_error.log`。
+- `[DONE] ...`：结束时打印输出路径、已翻译段落数和耗时。
+
 ## 参数说明
 
 - `--test`:
