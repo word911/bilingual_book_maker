@@ -26,6 +26,17 @@ def _safe_int(value, default):
         return default
 
 
+def _safe_float(value, default):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+GUI_DEFAULT_RPM = 8.0
+GUI_MAX_RPM = 9.9
+
+
 def guess_output_path(source_path):
     source = Path(source_path)
     ext = source.suffix.lower()
@@ -135,6 +146,12 @@ def build_cli_args(config):
 
     parallel_workers = max(1, _safe_int(config.get("parallel_workers", 1), 1))
     args.extend(["--parallel-workers", str(parallel_workers)])
+
+    rpm = _safe_float(config.get("rpm", GUI_DEFAULT_RPM), GUI_DEFAULT_RPM)
+    if rpm <= 0:
+        rpm = GUI_DEFAULT_RPM
+    rpm = min(rpm, GUI_MAX_RPM)
+    args.extend(["--rpm", f"{rpm:g}"])
 
     if config.get("accumulated_mode", True):
         accumulated_num = max(2, _safe_int(config.get("accumulated_num", 1200), 1200))

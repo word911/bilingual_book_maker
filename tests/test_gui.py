@@ -46,6 +46,9 @@ def test_build_cli_args_with_common_gui_options():
     assert "900" in args
     assert "--parallel-workers" in args
     assert "3" in args
+    assert "--rpm" in args
+    rpm_index = args.index("--rpm")
+    assert args[rpm_index + 1] == "8"
     assert "--no-tui" in args
 
 
@@ -62,6 +65,19 @@ def test_build_cli_args_can_disable_accumulated_mode():
     index = args.index("--accumulated_num")
     assert args[index + 1] == "1"
     assert "--resume" not in args
+
+
+def test_build_cli_args_caps_rpm_below_ten():
+    args = build_cli_args(
+        {
+            "source_path": "E:/books/demo.epub",
+            "rpm": 20,
+        }
+    )
+
+    assert "--rpm" in args
+    rpm_index = args.index("--rpm")
+    assert args[rpm_index + 1] == "9.9"
 
 
 def test_gui_service_parses_segment_tqdm_ratio_without_log_noise():
